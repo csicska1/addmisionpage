@@ -1,134 +1,102 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR Code Admission Scanner</title>
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            text-align: center;
-            background-color: #f4f4f4;
-        }
-        h1 {
-            margin-top: 20px;
-        }
-        #scanner-container {
-            width: 100%;
-            max-width: 400px;
-            margin: 20px auto;
-            border: 2px solid #333;
-            border-radius: 10px;
-            background-color: #fff;
-        }
-        button {
-            padding: 10px 20px;
-            margin: 10px 5px;
-            font-size: 16px;
-            cursor: pointer;
-            border-radius: 5px;
-            border: none;
-            background-color: #007bff;
-            color: white;
-        }
-        button:disabled {
-            background-color: gray;
-            cursor: not-allowed;
-        }
-        #scan-history {
-            max-width: 400px;
-            margin: 20px auto;
-            text-align: left;
-            background: #fff;
-            padding: 10px;
-            border-radius: 10px;
-            border: 1px solid #ccc;
-        }
-        .pass {
-            color: green;
-        }
-        .denied {
-            color: red;
-        }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QR Code Admission Scanner</title>
+
+  <!-- Load the library first -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; margin:0; padding:0; text-align:center; background:#f4f4f4; }
+    h1 { margin-top:20px; }
+    #scanner-container { width:100%; max-width:400px; margin:20px auto; border:2px solid #333; border-radius:10px; background:#fff; }
+    button { padding:10px 20px; margin:10px 5px; font-size:16px; cursor:pointer; border-radius:5px; border:none; background:#007bff; color:#fff; }
+    button:disabled { background:gray; cursor:not-allowed; }
+    #scan-history { max-width:400px; margin:20px auto; text-align:left; background:#fff; padding:10px; border-radius:10px; border:1px solid #ccc; }
+    .pass { color:green; }
+    .denied { color:red; }
+  </style>
 </head>
 <body>
-    <h1>QR Code Admission Scanner</h1>
-    <div id="scanner-container"></div>
-    <div>
-        <button id="start-scan">Start Scanning</button>
-        <button id="stop-scan" disabled>Stop Scanning</button>
-        <button id="clear-history">Clear History</button>
-    </div>
-    <div id="scan-history">
-        <h3>Scan History</h3>
-        <ul id="history-list"></ul>
-    </div>
+  <h1>QR Code Admission Scanner</h1>
+  <div id="scanner-container"></div>
+  <div>
+    <button id="start-scan">Start Scanning</button>
+    <button id="stop-scan" disabled>Stop Scanning</button>
+    <button id="clear-history">Clear History</button>
+  </div>
+  <div id="scan-history">
+    <h3>Scan History</h3>
+    <ul id="history-list"></ul>
+  </div>
 
-    <script>
-        document.addEventListener("DOMContentLoaded", () => {
-            const scannerContainer = document.getElementById("scanner-container");
-            const startButton = document.getElementById("start-scan");
-            const stopButton = document.getElementById("stop-scan");
-            const clearButton = document.getElementById("clear-history");
-            const historyList = document.getElementById("history-list");
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      // Confirm the library loaded
+      if (typeof window.Html5Qrcode !== "function") {
+        console.error("Html5Qrcode library failed to load. Check the script URL or network/CSP settings.");
+        alert("Scanner library failed to load. See console for details.");
+        return;
+      }
 
-            // Beep sound
-            const beepSound = new Audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3");
+      const scannerContainer = document.getElementById("scanner-container");
+      const startButton = document.getElementById("start-scan");
+      const stopButton = document.getElementById("stop-scan");
+      const clearButton = document.getElementById("clear-history");
+      const historyList = document.getElementById("history-list");
 
-            // Now Html5Qrcode is defined because the library script loaded first
-            let html5QrcodeScanner = new Html5Qrcode("scanner-container");
+      const beepSound = new Audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3");
 
-            function giveFeedback() {
-                // Play beep
-                beepSound.play().catch(err => console.log(err));
-                // Vibrate device if supported
-                if (navigator.vibrate) navigator.vibrate(200);
+      // instantiate after confirming library exists
+      let html5QrcodeScanner = new Html5Qrcode("scanner-container");
+
+      function giveFeedback() {
+        beepSound.play().catch(err => console.log(err));
+        if (navigator.vibrate) navigator.vibrate(200);
+      }
+
+      startButton.addEventListener("click", () => {
+        html5QrcodeScanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: 250 },
+          qrCodeMessage => {
+            let li = document.createElement("li");
+            if (qrCodeMessage.toLowerCase().includes("pass")) {
+              li.textContent = `✅ ${qrCodeMessage}`;
+              li.classList.add("pass");
+            } else {
+              li.textContent = `❌ ${qrCodeMessage}`;
+              li.classList.add("denied");
             }
-
-            startButton.addEventListener("click", () => {
-                html5QrcodeScanner.start(
-                    { facingMode: "environment" },
-                    { fps: 10, qrbox: 250 },
-                    qrCodeMessage => {
-                        let li = document.createElement("li");
-                        if (qrCodeMessage.toLowerCase().includes("pass")) {
-                            li.textContent = `✅ ${qrCodeMessage}`;
-                            li.classList.add("pass");
-                        } else {
-                            li.textContent = `❌ ${qrCodeMessage}`;
-                            li.classList.add("denied");
-                        }
-                        historyList.prepend(li);
-                        giveFeedback(); // Beep + vibrate
-                    },
-                    errorMessage => {
-                        // Optional: handle scan errors silently
-                    }
-                ).then(() => {
-                    startButton.disabled = true;
-                    stopButton.disabled = false;
-                }).catch(err => {
-                    alert("Unable to start scanning: " + err);
-                });
-            });
-
-            stopButton.addEventListener("click", () => {
-                html5QrcodeScanner.stop().then(() => {
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
-                }).catch(err => {
-                    alert("Unable to stop scanning: " + err);
-                });
-            });
-
-            clearButton.addEventListener("click", () => {
-                historyList.innerHTML = "";
-            });
+            historyList.prepend(li);
+            giveFeedback();
+          },
+          errorMessage => {
+            // optional silent handling
+          }
+        ).then(() => {
+          startButton.disabled = true;
+          stopButton.disabled = false;
+        }).catch(err => {
+          alert("Unable to start scanning: " + err);
         });
-    </script>
+      });
+
+      stopButton.addEventListener("click", () => {
+        html5QrcodeScanner.stop().then(() => {
+          startButton.disabled = false;
+          stopButton.disabled = true;
+        }).catch(err => {
+          alert("Unable to stop scanning: " + err);
+        });
+      });
+
+      clearButton.addEventListener("click", () => {
+        historyList.innerHTML = "";
+      });
+    });
+  </script>
 </body>
 </html>

@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QR Code Admission Scanner</title>
-    <!-- Load Html5Qrcode library FIRST -->
     <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
     <style>
         body {
@@ -80,6 +79,7 @@
             // Beep sound
             const beepSound = new Audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3");
 
+            // Now Html5Qrcode is defined because the library script loaded first
             let html5QrcodeScanner = new Html5Qrcode("scanner-container");
 
             function giveFeedback() {

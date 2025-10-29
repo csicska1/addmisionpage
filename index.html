@@ -252,6 +252,7 @@
     // ZXing reader
     const { BrowserMultiFormatReader, NotFoundException } = ZXing;
     const codeReader = new BrowserMultiFormatReader();
+    let currentDeviceId = '';
 
     // Load persisted settings
     (function restoreSettings(){
@@ -352,37 +353,22 @@
       resultRow.style.display = 'none';
       setStatus('Starting camera…');
 
-      const constraints = {
-        audio: false,
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      };
-
-      const selectedDeviceId = cameraSelect.value;
-      if (selectedDeviceId) {
-        constraints.video = { deviceId: { exact: selectedDeviceId } };
-      }
+      // Preferred deviceId from dropdown, else environment
+      currentDeviceId = cameraSelect.value || '';
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        currentStream = stream;
-        video.srcObject = stream;
-        await video.play();
-
-        track = stream.getVideoTracks()[0] || null;
-        torchBtn.disabled = !track || !track.getCapabilities || !track.getCapabilities().torch;
-
+        // Start decoding directly from the video device; ZXing controls the stream
         startBtn.disabled = true;
         stopBtn.disabled = false;
         setStatus('Scanning…', 'ok');
         decoding = true;
-        requestAnimationFrame(tick);
+
+        await startDecodeLoop();
       } catch (err) {
         console.error(err);
         setStatus('Camera error: ' + (err && err.message ? err.message : err), 'err');
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
       }
     }
 
@@ -393,45 +379,43 @@
         currentStream.getTracks().forEach(t => t.stop());
         currentStream = null;
       }
+      try { codeReader.reset(); } catch {}
       startBtn.disabled = false;
       stopBtn.disabled = true;
       torchBtn.disabled = true;
       setStatus('Stopped');
     }
 
-    async function tick() {
-      if (!decoding) return;
-      try {
-        const w = video.videoWidth;
-        const h = video.videoHeight;
-        if (w && h) {
-          canvas.width = w;
-          canvas.height = h;
-          ctx.drawImage(video, 0, 0, w, h);
-          const imgData = ctx.getImageData(0, 0, w, h);
+    // Start a loop using ZXing's video-device decoder
+    async function startDecodeLoop() {
+      // Close any previous streams the library might hold
+      try { codeReader.reset(); } catch {}
 
-          try {
-            const result = await codeReader.decodeFromImage(undefined, imgData);
-            if (result && result.text) {
-              const text = result.text.trim();
-              const pass = validateCode(text);
-              setResult(text, pass);
-              logEntry(text, pass);
-              // Pause briefly to avoid duplicates
-              decoding = false;
-              setTimeout(() => { decoding = true; requestAnimationFrame(tick); }, 1200);
-            }
-          } catch (e) {
-            if (!(e instanceof NotFoundException)) {
-              // Non-not-found error
-              console.debug('Decode error', e);
-            }
-          }
+      const deviceId = currentDeviceId || undefined;
+
+      const onResult = async (result, err) => {
+        if (!decoding) return;
+        if (result && result.text) {
+          const text = result.text.trim();
+          const pass = validateCode(text);
+          setResult(text, pass);
+          logEntry(text, pass);
+          // Short pause to avoid duplicate reads
+          decoding = false;
+          setTimeout(() => { decoding = true; }, 1000);
         }
-      } catch (e) {
-        console.debug('Frame error', e);
-      }
-      requestAnimationFrame(tick);
+        if (err && !(err instanceof NotFoundException)) {
+          console.debug('Decode error', err);
+        }
+      };
+
+      // Begin continuous decoding
+      await codeReader.decodeFromVideoDevice(deviceId, video, onResult);
+
+      // After the stream starts, get track and enable torch if possible
+      currentStream = video.srcObject || null;
+      track = currentStream ? currentStream.getVideoTracks()[0] : null;
+      torchBtn.disabled = !track || !track.getCapabilities || !track.getCapabilities().torch;
     }
 
     async function toggleTorch() {
@@ -450,19 +434,14 @@
     downloadLogBtn.addEventListener('click', downloadCSV);
 
     cameraSelect.addEventListener('change', () => {
+      currentDeviceId = cameraSelect.value || '';
       if (!stopBtn.disabled) start();
     });
 
     // Init
     (async function init(){
       await listCameras();
-      // On iOS Safari, camera labels require prior permission to be visible
-      // so we try a silent start then stop to populate labels
-      try {
-        await start();
-        stop();
-        await listCameras();
-      } catch {}
+      // On iOS Safari, labels may be blank until permission is granted; we'll rely on Start button
     })();
 
     // PWA-ish install prompt if desired (optional)

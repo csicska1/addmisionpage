@@ -4,10 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>QR Code Admission Scanner</title>
-
-  <!-- Primary CDN -->
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
-
   <style>
     body { font-family: Arial, sans-serif; margin:0; padding:0; text-align:center; background:#f4f4f4; }
     h1 { margin-top:20px; }
@@ -38,88 +34,70 @@
   </div>
 
   <script>
-    // Attempt fallback loading if primary script didn't define Html5Qrcode
-    (function ensureHtml5Qrcode(cb) {
-      const already = typeof window.Html5Qrcode === "function";
-      if (already) {
-        return cb(null);
-      }
+    // Try multiple sources; prefer CDNs but fall back to a local file served from the same origin
+    const fallbackUrls = [
+      "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/minified/html5-qrcode.min.js",
+      "https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js",
+      "/js/html5-qrcode.min.js" // local copy you must provide on your server
+    ];
 
-      // If primary script is missing/blocked, try a well-known mirror
-      const fallbackUrls = [
-        "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"
-      ];
-
-      let tried = 0;
-      function tryNext() {
-        if (typeof window.Html5Qrcode === "function") return cb(null);
-        if (tried >= fallbackUrls.length) return cb(new Error("Html5Qrcode library failed to load"));
+    function loadScriptSequential(urls, cb) {
+      let i = 0;
+      function next() {
+        if (window.Html5Qrcode) return cb(null);
+        if (i >= urls.length) return cb(new Error("All script sources failed"));
         const s = document.createElement("script");
-        s.src = fallbackUrls[tried++];
+        s.src = urls[i++];
         s.async = true;
         s.onload = () => {
-          if (typeof window.Html5Qrcode === "function") return cb(null);
-          tryNext();
+          // if the library defines the global, succeed; otherwise try next
+          if (window.Html5Qrcode) return cb(null);
+          next();
         };
-        s.onerror = tryNext;
+        s.onerror = () => next();
         document.head.appendChild(s);
       }
+      next();
+    }
 
-      tryNext();
-    })(function(err) {
-      if (err) {
-        console.error("Html5Qrcode library failed to load. Check script URL, network or CSP settings.", err);
-        const loaderMsg = document.getElementById("loader-msg");
+    loadScriptSequential(fallbackUrls, function(err) {
+      const loaderMsg = document.getElementById("loader-msg");
+      if (err || typeof window.Html5Qrcode !== "function") {
+        console.error("Html5Qrcode failed to load. Check network/CSP/ORB or provide a local copy at /js/html5-qrcode.min.js.", err);
         if (loaderMsg) loaderMsg.textContent = "Scanner library failed to load. See console for details.";
         return;
       }
-
-      // Library loaded successfully — initialize UI and scanner behavior
-      document.addEventListener("DOMContentLoaded", initScanner);
-      // If DOMContentLoaded already fired, call immediately
-      if (document.readyState === "interactive" || document.readyState === "complete") {
-        initScanner();
-      }
+      if (loaderMsg && loaderMsg.parentNode) loaderMsg.parentNode.removeChild(loaderMsg);
+      initScanner();
     });
 
     function initScanner() {
-      // Elements
       const containerId = "scanner-container";
-      const scannerContainer = document.getElementById(containerId);
       const startButton = document.getElementById("start-scan");
       const stopButton = document.getElementById("stop-scan");
       const clearButton = document.getElementById("clear-history");
       const historyList = document.getElementById("history-list");
-      const loaderMsg = document.getElementById("loader-msg");
 
-      // Remove loader message once we attach scanner element
-      if (loaderMsg && loaderMsg.parentNode) loaderMsg.parentNode.removeChild(loaderMsg);
-
-      // Beep sound (catch play errors silently)
       const beepSound = new Audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3");
 
-      // Instantiate Html5Qrcode safely
       let html5Qrcode;
       try {
         html5Qrcode = new Html5Qrcode(containerId);
       } catch (e) {
-        console.error("Failed to create Html5Qrcode instance", e);
-        const el = document.createElement("div");
-        el.textContent = "Unable to create scanner. See console for details.";
-        scannerContainer.appendChild(el);
+        console.error("Failed to instantiate Html5Qrcode", e);
+        document.getElementById(containerId).appendChild(Object.assign(document.createElement("div"), {textContent:"Unable to create scanner. See console."}));
         startButton.disabled = true;
         stopButton.disabled = true;
         return;
       }
 
       function giveFeedback() {
-        beepSound.play().catch(() => {});
+        beepSound.play().catch(()=>{});
         if (navigator.vibrate) navigator.vibrate(200);
       }
 
       startButton.addEventListener("click", () => {
         startButton.disabled = true;
-        // Prefer environment-facing camera
         const constraints = { facingMode: { ideal: "environment" } };
         html5Qrcode.start(
           constraints,
@@ -136,14 +114,12 @@
             historyList.prepend(li);
             giveFeedback();
           },
-          errorMessage => {
-            // silent by design; could log minimal info
-          }
+          errorMessage => {}
         ).then(() => {
           startButton.disabled = true;
           stopButton.disabled = false;
         }).catch(err => {
-          console.error("Unable to start scanning:", err);
+          console.error("start() failed:", err);
           alert("Unable to start scanning: " + err);
           startButton.disabled = false;
         });
@@ -155,24 +131,18 @@
           startButton.disabled = false;
           stopButton.disabled = true;
         }).catch(err => {
-          console.error("Unable to stop scanning:", err);
+          console.error("stop() failed:", err);
           alert("Unable to stop scanning: " + err);
           stopButton.disabled = false;
         });
       });
 
-      clearButton.addEventListener("click", () => {
-        historyList.innerHTML = "";
-      });
+      clearButton.addEventListener("click", () => historyList.innerHTML = "");
 
-      // Optional: release camera if user navigates away
       window.addEventListener("beforeunload", () => {
-        if (html5Qrcode && html5Qrcode.getState && html5Qrcode.getState() === Html5Qrcode.ScannerState.SCANNING) {
-          try { html5Qrcode.stop(); } catch (e) {}
-        }
+        try { html5Qrcode && html5Qrcode.getState && html5Qrcode.getState() === Html5Qrcode.ScannerState.SCANNING && html5Qrcode.stop(); } catch (e) {}
       });
     }
   </script>
 </body>
 </html>
-```

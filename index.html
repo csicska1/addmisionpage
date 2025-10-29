@@ -4,72 +4,62 @@
 <meta charset="UTF-8">
 <title>QR Access Manager</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <style>
-  body { font-family: Arial, sans-serif; padding: 20px; text-align: center; background: #f4f4f4; }
-  h1 { margin-bottom: 10px; }
-  #qr-canvas { margin-top: 10px; }
-  #qr-reader { width: 300px; margin: 20px auto; }
-  #result { font-size: 1.5em; margin-top: 10px; }
-  #result.pass { color: green; }
-  #result.denied { color: red; }
-  #history { margin-top: 20px; max-width: 400px; margin-left:auto;margin-right:auto; text-align:left;}
-  #history ul { list-style:none; padding-left:0; }
+  body { font-family: Arial, sans-serif; background:#f4f4f4; margin:0; padding:20px; text-align:center; }
+  h1 { margin-bottom: 5px; }
+  .section { background:#fff; padding:20px; margin:20px auto; border-radius:8px; max-width:400px; box-shadow:0 0 10px rgba(0,0,0,0.1); }
+  input[type=text]{ width:70%; padding:8px; margin-bottom:10px; }
+  button{ padding:8px 15px; cursor:pointer; border:none; background:#007BFF; color:white; border-radius:4px; }
+  button:hover{ background:#0056b3; }
+  #qr-canvas { margin-top:10px; }
+  #qr-reader { width:300px; margin:0 auto; }
+  #result { font-size:1.2em; margin-top:10px; font-weight:bold; }
+  #result.pass { color:green; }
+  #result.denied { color:red; }
+  #history { margin-top:20px; text-align:left; max-width:400px; margin-left:auto; margin-right:auto; }
+  #history ul{ list-style:none; padding-left:0; }
+  #history li{ padding:5px; border-bottom:1px solid #ddd; }
 </style>
 </head>
 <body>
-  <h1>QR Access Manager</h1>
 
-  <!-- QR Generation -->
-  <div>
-    <h2>Generate QR</h2>
-    <input type="text" id="qr-text" placeholder="Enter user code" />
-    <button onclick="generateQR()">Generate</button>
-    <canvas id="qr-canvas"></canvas>
-  </div>
+<h1>QR Access Manager</h1>
 
-  <!-- QR Scanning -->
-  <div>
-    <h2>Scan QR</h2>
-    <div id="qr-reader"></div>
-    <div id="result"></div>
-  </div>
+<div class="section">
+  <h2>Generate QR</h2>
+  <input type="text" id="qr-text" placeholder="Enter user code" />
+  <button onclick="generateQR()">Generate</button>
+  <div><canvas id="qr-canvas"></canvas></div>
+</div>
 
-  <!-- Scan History -->
-  <div id="history">
-    <h2>Scan History</h2>
-    <ul id="scan-history"></ul>
-  </div>
+<div class="section">
+  <h2>Scan QR</h2>
+  <div id="qr-reader"></div>
+  <div id="result"></div>
+</div>
+
+<div class="section" id="history">
+  <h2>Scan History</h2>
+  <ul id="scan-history"></ul>
+</div>
 
 <script>
-// ---------- Simple QR Generator ----------
-function generateQR() {
-  const text = document.getElementById("qr-text").value.trim();
-  if (!text) return alert("Enter a code to generate QR");
-
-  // Simple QR using canvas
-  const canvas = document.getElementById("qr-canvas");
-  canvas.width = 200; canvas.height = 200;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#FFF"; ctx.fillRect(0,0,200,200);
-  ctx.fillStyle = "#000";
-
-  // Using built-in QR code lib
-  const qr = new QRCodeGenerator(text);
-  const matrix = qr.generate(4, "M"); // version 4, M error correction
-
-  const cellSize = 200 / matrix.length;
-  for (let y = 0; y < matrix.length; y++) {
-    for (let x = 0; x < matrix.length; x++) {
-      if (matrix[y][x]) ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
-    }
-  }
-}
-
 // ---------- Allowed codes ----------
 let allowedCodes = ["ALLOWED123","VIP_PASS","EMPLOYEE_001"];
 
+// ---------- Generate QR ----------
+function generateQR(){
+  const text = document.getElementById("qr-text").value.trim();
+  if(!text){ alert("Enter a code"); return; }
+  const canvas = document.getElementById("qr-canvas");
+  QRCode.toCanvas(canvas, text, {width:200}, function (error) {
+    if(error) console.error(error);
+  });
+}
+
 // ---------- Scan History ----------
-function addHistory(code,status) {
+function addHistory(code,status){
   const ul = document.getElementById("scan-history");
   const li = document.createElement("li");
   const time = new Date().toLocaleTimeString();
@@ -77,7 +67,7 @@ function addHistory(code,status) {
   ul.prepend(li);
 }
 
-// ---------- Scan result display ----------
+// ---------- Display scan result ----------
 function showResult(status,message,code){
   const resDiv = document.getElementById("result");
   resDiv.textContent = message;
@@ -87,42 +77,35 @@ function showResult(status,message,code){
 
 // ---------- QR Scanner ----------
 function onScanSuccess(decodedText){
-  if (allowedCodes.includes(decodedText)){
+  if(allowedCodes.includes(decodedText)){
     showResult("pass","✅ Access Granted",decodedText);
   } else {
     showResult("denied","❌ Access Denied",decodedText);
   }
 }
 
-function onScanFailure(error){ /* ignore */ }
+function onScanFailure(error){ /* ignore scan failures */ }
 
+// Initialize scanner
 const html5QrCode = new Html5Qrcode("qr-reader");
-Html5Qrcode.getCameras().then(cameras=>{
+Html5Qrcode.getCameras().then(cameras => {
   if(cameras && cameras.length){
     const cameraId = cameras[0].id;
-    html5QrCode.start(cameraId,{fps:10,qrbox:250},onScanSuccess,onScanFailure)
-      .catch(err=>showResult("denied","❌ Camera not accessible",""));
+    html5QrCode.start(
+      cameraId,
+      {fps:10, qrbox:250},
+      onScanSuccess,
+      onScanFailure
+    ).catch(err=>{
+      showResult("denied","❌ Camera not accessible","");
+      console.error(err);
+    });
   } else showResult("denied","❌ No camera found","");
-}).catch(err=>showResult("denied","❌ Cannot access cameras",""));
-
-// ---------- Simple QR Generator Class ----------
-class QRCodeGenerator {
-  constructor(text){ this.text = text; }
-  generate(version,ecl){
-    // Minimal QR for demonstration: convert text to bytes and simple boolean matrix
-    const size = 21 + (version-1)*4;
-    const m = Array.from({length:size},()=>Array(size).fill(false));
-    let x=0,y=0;
-    for(let c of this.text){
-      let code = c.charCodeAt(0);
-      for(let i=7;i>=0;i--){
-        m[y][x] = (code>>i)&1;
-        x++; if(x>=size){ x=0; y++; if(y>=size) break; }
-      }
-    }
-    return m;
-  }
-}
+}).catch(err=>{
+  showResult("denied","❌ Cannot access camera","");
+  console.error(err);
+});
 </script>
+
 </body>
 </html>

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auto OCR Sequence Checker</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin:20px; background:#f6f7fb; color:#222; text-align:center; }
+    h1 { margin-bottom:6px; }
+    #videoWrap { display:inline-block; background:#000; border-radius:8px; overflow:hidden; }
+    video { width:360px; height:270px; background:#000; display:block; }
+    canvas { display:none; }
+    #controls { margin-top:12px; }
+    button { padding:8px 14px; margin:0 6px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer; }
+    button.secondary { background:#6c757d; }
+    button:disabled { background:#999; cursor:not-allowed; }
+    #status { margin-top:12px; font-weight:600; }
+    #history { max-width:520px; margin:14px auto 0; text-align:left; background:#fff; padding:10px; border-radius:8px; border:1px solid #e0e3ea; }
+    li.pass { color:green; font-weight:700; }
+    li.denied { color:#c00; font-weight:700; }
+    #target { font-weight:700; color:#333; }
+    #adminPanel { margin-top:12px; display:none; background:#fff; padding:10px; border-radius:8px; border:1px solid #ddd; max-width:520px; margin-left:auto; margin-right:auto; text-align:left; }
+    input[type="text"], input[type="password"] { padding:6px 8px; border-radius:4px; border:1px solid #ccc; width:200px; }
+    label { display:block; margin-top:8px; font-weight:600; }
+    .row { display:flex; gap:8px; align-items:center; margin-top:8px; }
+    .small { font-size:13px; color:#666; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:12px; background:#eef; margin-left:8px; font-weight:700; color:#045; }
+  </style>
+</head>
+<body>
+  <h1>Auto OCR Sequence Checker</h1>
+
+  <div id="videoWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="capture"></canvas>
+  </div>
+
+  <div id="controls">
+    <button id="startBtn" class="secondary">Start Camera & Auto Scan</button>
+    <button id="stopBtn" disabled>Stop Camera</button>
+    <button id="restartScanBtn" disabled>Restart Scan</button>
+    <button id="adminOpenBtn">Edit Whitelist (Admin)</button>
+    <button id="clearBtn">Clear History</button>
+  </div>
+
+  <div id="status">Status: <span id="statusText">Idle</span> <span id="lastFound" class="badge" style="display:none"></span></div>
+  <div class="small">Detected digits are extracted from OCR output (digits only). Scanning stops after first detection and classification.</div>
+
+  <div id="history">
+    <h3>Scans</h3>
+    <ul id="list"></ul>
+  </div>
+
+  <div id="adminPanel">
+    <strong>Whitelist editor</strong>
+    <div class="small">Add numeric sequences that should be accepted as Pass.</div>
+
+    <label>New entry (digits only)</label>
+    <div class="row">
+      <input id="newEntry" type="text" placeholder="e.g. 123456" />
+      <button id="addEntryBtn">Add</button>
+    </div>
+
+    <label>Current whitelist</label>
+    <ul id="whitelist"></ul>
+
+    <div class="row">
+      <button id="closeAdminBtn" class="secondary">Close</button>
+      <button id="resetWhitelistBtn" class="secondary">Reset to default</button>
+    </div>
+  </div>
+
+  <!-- Tesseract.js - if your hosting blocks CDN, self-host tesseract.min.js and update src -->
+  <script src="https://unpkg.com/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+
+  <script>
+    // -------- CONFIGURATION --------
+    const ADMIN_CODE = "letmein123"; // change to secure code you want
+    const DEFAULT_WHITELIST = ["123456"]; // defaults
+    const OCR_INTERVAL_MS = 700; // how often to capture frames for OCR during auto-scan
+    const EXTRACT_DIGITS_ONLY = true; // extract only digits from OCR result
+    // --------------------------------
+
+    // UI refs
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('capture');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const restartScanBtn = document.getElementById('restartScanBtn');
+    const adminOpenBtn = document.getElementById('adminOpenBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const statusText = document.getElementById('statusText');
+    const lastFoundBadge = document.getElementById('lastFound');
+    const list = document.getElementById('list');
+
+    // Admin panel
+    const adminPanel = document.getElementById('adminPanel');
+    const addEntryBtn = document.getElementById('addEntryBtn');
+    const newEntry = document.getElementById('newEntry');
+    const whitelistEl = document.getElementById('whitelist');
+    const closeAdminBtn = document.getElementById('closeAdminBtn');
+    const resetWhitelistBtn = document.getElementById('resetWhitelistBtn');
+
+    // state
+    let stream = null;
+    let scanning = false;
+    let ocrTimer = null;
+    let isProcessingOcr = false;
+
+    // load or create whitelist in localStorage
+    function loadWhitelist() {
+      try {
+        const v = localStorage.getItem('ocr_whitelist_v1');
+        if (!v) {
+          localStorage.setItem('ocr_whitelist_v1', JSON.stringify(DEFAULT_WHITELIST));
+          return DEFAULT_WHITELIST.slice();
+        }
+        const arr = JSON.parse(v);
+        if (!Array.isArray(arr)) throw new Error('bad');
+        return arr;
+      } catch (e) {
+        localStorage.setItem('ocr_whitelist_v1', JSON.stringify(DEFAULT_WHITELIST));
+        return DEFAULT_WHITELIST.slice();
+      }
+    }
+    function saveWhitelist(arr) {
+      localStorage.setItem('ocr_whitelist_v1', JSON.stringify(arr));
+    }
+    let whitelist = loadWhitelist();
+
+    function renderWhitelist() {
+      whitelistEl.innerHTML = '';
+      whitelist.forEach((w, idx) => {
+        const li = document.createElement('li');
+        li.textContent = w + " ";
+        const del = document.createElement('button');
+        del.textContent = 'Remove';
+        del.style.marginLeft = '8px';
+        del.addEventListener('click', () => {
+          whitelist.splice(idx, 1);
+          saveWhitelist(whitelist);
+          renderWhitelist();
+        });
+        li.appendChild(del);
+        whitelistEl.appendChild(li);
+      });
+    }
+    renderWhitelist();
+
+    function addHistoryItem(text, passed) {
+      const li = document.createElement('li');
+      li.textContent = `${new Date().toLocaleTimeString()} — ${text}`;
+      li.className = passed ? 'pass' : 'denied';
+      list.prepend(li);
+    }
+
+    function normalizeText(t) {
+      if (!t) return '';
+      if (!EXTRACT_DIGITS_ONLY) return t.trim();
+      const m = t.match(/\d+/g);
+      return m ? m.join('') : '';
+    }
+
+    function checkWhitelist(digits) {
+      if (!digits) return false;
+      return whitelist.includes(digits);
+    }
+
+    async function startCameraAndAutoScan() {
+      if (scanning) return;
+      statusText.textContent = 'Requesting camera permission...';
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+        video.srcObject = stream;
+        scanning = true;
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        restartScanBtn.disabled = true;
+        statusText.textContent = 'Scanning (auto). Point camera at numbers.';
+        lastFoundBadge.style.display = 'none';
+        // start periodic OCR attempts
+        ocrTimer = setInterval(captureAndOcrOnce, OCR_INTERVAL_MS);
+      } catch (err) {
+        console.error('camera start failed', err);
+        statusText.textContent = 'Unable to access camera';
+      }
+    }
+
+    async function stopCamera() {
+      if (ocrTimer) {
+        clearInterval(ocrTimer);
+        ocrTimer = null;
+      }
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      video.srcObject = null;
+      scanning = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      restartScanBtn.disabled = false;
+      statusText.textContent = 'Camera stopped';
+    }
+
+    async function captureAndOcrOnce() {
+      if (!scanning || isProcessingOcr) return;
+      isProcessingOcr = true;
+      try {
+        const vw = video.videoWidth || 360;
+        const vh = video.videoHeight || 270;
+        if (vw === 0 || vh === 0) {
+          isProcessingOcr = false;
+          return;
+        }
+        // crop center area to improve OCR speed and reliability
+        const ctx = canvas.getContext('2d');
+        const cropW = Math.floor(vw * 0.8);
+        const cropH = Math.floor(vh * 0.4);
+        const sx = Math.floor((vw - cropW) / 2);
+        const sy = Math.floor((vh - cropH) / 2);
+        canvas.width = cropW;
+        canvas.height = cropH;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, cropW, cropH);
+        ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, cropW, cropH);
+
+        const dataUrl = canvas.toDataURL('image/png');
+
+        // run OCR (Tesseract.recognize)
+        // Tesseract is somewhat heavy; caching loaded worker would be better but for simplicity we call recognize
+        let result;
+        try {
+          result = await Tesseract.recognize(dataUrl, 'eng', { logger: m => {} });
+        } catch (ocrErr) {
+          console.error('OCR error', ocrErr);
+          isProcessingOcr = false;
+          return;
+        }
+        const raw = result && result.data && result.data.text ? result.data.text : '';
+        const digits = normalizeText(raw);
+        if (digits) {
+          // something found — stop scanning and evaluate
+          if (ocrTimer) {
+            clearInterval(ocrTimer);
+            ocrTimer = null;
+          }
+          // stop camera tracks but keep video frame visible for review
+          if (stream) stream.getTracks().forEach(t => t.stop());
+          scanning = false;
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+          restartScanBtn.disabled = false;
+
+          lastFoundBadge.style.display = 'inline-block';
+          lastFoundBadge.textContent = digits;
+
+          const passed = checkWhitelist(digits);
+          addHistoryItem(digits + (passed ? ' (Pass)' : ' (Denied)'), passed);
+          statusText.textContent = passed ? 'PASS' : 'DENIED';
+          // optional feedback
+          try { new Audio('https://www.soundjay.com/buttons/sounds/beep-07.mp3').play().catch(()=>{}); } catch(e){}
+        }
+      } finally {
+        isProcessingOcr = false;
+      }
+    }
+
+    // Admin flow: require code prompt
+    adminOpenBtn.addEventListener('click', () => {
+      const code = prompt('Enter admin code to edit whitelist');
+      if (!code) return;
+      if (code === ADMIN_CODE) {
+        adminPanel.style.display = 'block';
+        renderWhitelist();
+      } else {
+        alert('Incorrect admin code');
+      }
+    });
+
+    closeAdminBtn.addEventListener('click', () => { adminPanel.style.display = 'none'; });
+    addEntryBtn.addEventListener('click', () => {
+      const v = (newEntry.value || '').trim();
+      if (!/^\d+$/.test(v)) { alert('Please enter digits only'); return; }
+      if (whitelist.includes(v)) { alert('Entry already exists'); return; }
+      whitelist.push(v);
+      saveWhitelist(whitelist);
+      renderWhitelist();
+      newEntry.value = '';
+    });
+    resetWhitelistBtn.addEventListener('click', () => {
+      if (!confirm('Reset whitelist to default?')) return;
+      whitelist = DEFAULT_WHITELIST.slice();
+      saveWhitelist(whitelist);
+      renderWhitelist();
+    });
+
+    // Buttons
+    startBtn.addEventListener('click', startCameraAndAutoScan);
+    stopBtn.addEventListener('click', stopCamera);
+    restartScanBtn.addEventListener('click', () => {
+      // allow user to start another auto-scan session
+      lastFoundBadge.style.display = 'none';
+      statusText.textContent = 'Idle';
+      startCameraAndAutoScan();
+    });
+    clearBtn.addEventListener('click', () => list.innerHTML = '');
+
+    // convenience: load whitelist UI on page load (hidden)
+    renderWhitelist();
+
+    // If desired, start automatically immediately on page load:
+    // startCameraAndAutoScan();
+
+    // cleanup
+    window.addEventListener('beforeunload', () => {
+      if (ocrTimer) clearInterval(ocrTimer);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    });
+  </script>
+</body>
+</html>

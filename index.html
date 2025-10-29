@@ -1,95 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QR Code Scanner</title>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    text-align: center;
-    padding: 20px;
-  }
-  #scanner-container {
-    width: 100%;
-    max-width: 400px;
-    margin: 20px auto;
-  }
-  button {
-    padding: 10px 20px;
-    font-size: 16px;
-    cursor: pointer;
-  }
-  #result {
-    margin-top: 20px;
-    font-size: 18px;
-    font-weight: bold;
-  }
-  #history {
-    margin-top: 20px;
-    text-align: left;
-    max-width: 400px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Admission Scanner</title>
+    <!-- Html5Qrcode library -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            text-align: center;
+            background-color: #f4f4f4;
+        }
+        h1 {
+            margin-top: 20px;
+        }
+        #scanner-container {
+            width: 100%;
+            max-width: 400px;
+            margin: 20px auto;
+            border: 2px solid #333;
+            border-radius: 10px;
+            background-color: #fff;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+        }
+        #scan-history {
+            max-width: 400px;
+            margin: 20px auto;
+            text-align: left;
+            background: #fff;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+        }
+        .pass {
+            color: green;
+        }
+        .denied {
+            color: red;
+        }
+    </style>
 </head>
 <body>
+    <h1>QR Code Admission Scanner</h1>
+    <div id="scanner-container"></div>
+    <button id="start-scan">Start Scanning</button>
 
-<h1>QR Code Scanner</h1>
+    <div id="scan-history">
+        <h3>Scan History</h3>
+        <ul id="history-list"></ul>
+    </div>
 
-<button id="scan-button">Scan QR Code</button>
-<div id="scanner-container"></div>
-<div id="result"></div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const scannerContainer = document.getElementById("scanner-container");
+            const startButton = document.getElementById("start-scan");
+            const historyList = document.getElementById("history-list");
 
-<h2>Scan History</h2>
-<ul id="history"></ul>
+            let html5QrcodeScanner;
 
-<!-- Include Html5Qrcode library -->
-<script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+            startButton.addEventListener("click", () => {
+                if (html5QrcodeScanner) {
+                    html5QrcodeScanner.start(
+                        { facingMode: "environment" }, 
+                        { fps: 10, qrbox: 250 },
+                        qrCodeMessage => {
+                            // Example logic: check content to determine pass/denied
+                            let li = document.createElement("li");
+                            if (qrCodeMessage.toLowerCase().includes("pass")) {
+                                li.textContent = `✅ ${qrCodeMessage}`;
+                                li.classList.add("pass");
+                            } else {
+                                li.textContent = `❌ ${qrCodeMessage}`;
+                                li.classList.add("denied");
+                            }
+                            historyList.prepend(li); // newest first
+                        },
+                        errorMessage => {
+                            // ignore scan errors
+                        }
+                    ).catch(err => {
+                        alert("Unable to start scanning: " + err);
+                    });
+                } else {
+                    html5QrcodeScanner = new Html5Qrcode("scanner-container");
+                    startButton.textContent = "Scanning...";
+                    startButton.disabled = true;
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const scanButton = document.getElementById('scan-button');
-    const scannerContainer = document.getElementById('scanner-container');
-    const resultDiv = document.getElementById('result');
-    const historyList = document.getElementById('history');
-
-    let html5QrcodeScanner = null;
-
-    scanButton.addEventListener('click', () => {
-        if (!html5QrcodeScanner) {
-            html5QrcodeScanner = new Html5Qrcode("scanner-container");
-        }
-
-        Html5Qrcode.getCameras().then(cameras => {
-            if (cameras && cameras.length) {
-                const cameraId = cameras[0].id;
-                html5QrcodeScanner.start(
-                    cameraId,
-                    { fps: 10, qrbox: 250 },
-                    qrCodeMessage => {
-                        let status = (qrCodeMessage.toLowerCase() === "pass") ? "✅ Pass" : "❌ Denied";
-                        resultDiv.textContent = `Scanned: ${qrCodeMessage} — ${status}`;
-
-                        // Add to history
-                        const li = document.createElement('li');
-                        li.textContent = `${new Date().toLocaleTimeString()}: ${qrCodeMessage} — ${status}`;
-                        historyList.prepend(li);
-
-                        html5QrcodeScanner.stop().catch(err => console.error(err));
-                    },
-                    errorMessage => {
-                        console.warn(`QR scan error: ${errorMessage}`);
-                    }
-                ).catch(err => resultDiv.textContent = `Error starting scanner: ${err}`);
-            } else {
-                resultDiv.textContent = "No camera found.";
-            }
-        }).catch(err => resultDiv.textContent = `Camera error: ${err}`);
-    });
-});
-</script>
-
+                    html5QrcodeScanner.start(
+                        { facingMode: "environment" }, 
+                        { fps: 10, qrbox: 250 },
+                        qrCodeMessage => {
+                            let li = document.createElement("li");
+                            if (qrCodeMessage.toLowerCase().includes("pass")) {
+                                li.textContent = `✅ ${qrCodeMessage}`;
+                                li.classList.add("pass");
+                            } else {
+                                li.textContent = `❌ ${qrCodeMessage}`;
+                                li.classList.add("denied");
+                            }
+                            historyList.prepend(li);
+                        },
+                        errorMessage => {}
+                    ).catch(err => {
+                        alert("Unable to start scanning: " + err);
+                    });
+                }
+            });
+        });
+    </script>
 </body>
 </html>

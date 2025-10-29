@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QR Code Admission Scanner</title>
-    <!-- Html5Qrcode library -->
+    <!-- Html5Qrcode library must be loaded before your script -->
     <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
     <style>
         body {
@@ -27,13 +27,17 @@
         }
         button {
             padding: 10px 20px;
-            margin: 10px;
+            margin: 10px 5px;
             font-size: 16px;
             cursor: pointer;
             border-radius: 5px;
             border: none;
             background-color: #007bff;
             color: white;
+        }
+        button:disabled {
+            background-color: gray;
+            cursor: not-allowed;
         }
         #scan-history {
             max-width: 400px;
@@ -55,68 +59,63 @@
 <body>
     <h1>QR Code Admission Scanner</h1>
     <div id="scanner-container"></div>
-    <button id="start-scan">Start Scanning</button>
-
+    <div>
+        <button id="start-scan">Start Scanning</button>
+        <button id="stop-scan" disabled>Stop Scanning</button>
+        <button id="clear-history">Clear History</button>
+    </div>
     <div id="scan-history">
         <h3>Scan History</h3>
         <ul id="history-list"></ul>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener("DOMContentLoaded", () => {
             const scannerContainer = document.getElementById("scanner-container");
             const startButton = document.getElementById("start-scan");
+            const stopButton = document.getElementById("stop-scan");
+            const clearButton = document.getElementById("clear-history");
             const historyList = document.getElementById("history-list");
 
-            let html5QrcodeScanner;
+            let html5QrcodeScanner = new Html5Qrcode("scanner-container");
 
             startButton.addEventListener("click", () => {
-                if (html5QrcodeScanner) {
-                    html5QrcodeScanner.start(
-                        { facingMode: "environment" }, 
-                        { fps: 10, qrbox: 250 },
-                        qrCodeMessage => {
-                            // Example logic: check content to determine pass/denied
-                            let li = document.createElement("li");
-                            if (qrCodeMessage.toLowerCase().includes("pass")) {
-                                li.textContent = `✅ ${qrCodeMessage}`;
-                                li.classList.add("pass");
-                            } else {
-                                li.textContent = `❌ ${qrCodeMessage}`;
-                                li.classList.add("denied");
-                            }
-                            historyList.prepend(li); // newest first
-                        },
-                        errorMessage => {
-                            // ignore scan errors
+                html5QrcodeScanner.start(
+                    { facingMode: "environment" },
+                    { fps: 10, qrbox: 250 },
+                    qrCodeMessage => {
+                        let li = document.createElement("li");
+                        if (qrCodeMessage.toLowerCase().includes("pass")) {
+                            li.textContent = `✅ ${qrCodeMessage}`;
+                            li.classList.add("pass");
+                        } else {
+                            li.textContent = `❌ ${qrCodeMessage}`;
+                            li.classList.add("denied");
                         }
-                    ).catch(err => {
-                        alert("Unable to start scanning: " + err);
-                    });
-                } else {
-                    html5QrcodeScanner = new Html5Qrcode("scanner-container");
-                    startButton.textContent = "Scanning...";
+                        historyList.prepend(li);
+                    },
+                    errorMessage => {
+                        // Optional: handle scan errors
+                    }
+                ).then(() => {
                     startButton.disabled = true;
+                    stopButton.disabled = false;
+                }).catch(err => {
+                    alert("Unable to start scanning: " + err);
+                });
+            });
 
-                    html5QrcodeScanner.start(
-                        { facingMode: "environment" }, 
-                        { fps: 10, qrbox: 250 },
-                        qrCodeMessage => {
-                            let li = document.createElement("li");
-                            if (qrCodeMessage.toLowerCase().includes("pass")) {
-                                li.textContent = `✅ ${qrCodeMessage}`;
-                                li.classList.add("pass");
-                            } else {
-                                li.textContent = `❌ ${qrCodeMessage}`;
-                                li.classList.add("denied");
-                            }
-                            historyList.prepend(li);
-                        },
-                        errorMessage => {}
-                    ).catch(err => {
-                        alert("Unable to start scanning: " + err);
-                    });
-                }
+            stopButton.addEventListener("click", () => {
+                html5QrcodeScanner.stop().then(() => {
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                }).catch(err => {
+                    alert("Unable to stop scanning: " + err);
+                });
+            });
+
+            clearButton.addEventListener("click", () => {
+                historyList.innerHTML = "";
             });
         });
     </script>

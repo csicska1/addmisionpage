@@ -5,65 +5,128 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>QR Code Admission Scanner</title>
 
-  <!-- Load the library first -->
+  <!-- Primary CDN -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
 
   <style>
     body { font-family: Arial, sans-serif; margin:0; padding:0; text-align:center; background:#f4f4f4; }
     h1 { margin-top:20px; }
-    #scanner-container { width:100%; max-width:400px; margin:20px auto; border:2px solid #333; border-radius:10px; background:#fff; }
+    #scanner-container { width:100%; max-width:400px; margin:20px auto; border:2px solid #333; border-radius:10px; background:#fff; min-height:260px; display:flex; align-items:center; justify-content:center; }
     button { padding:10px 20px; margin:10px 5px; font-size:16px; cursor:pointer; border-radius:5px; border:none; background:#007bff; color:#fff; }
     button:disabled { background:gray; cursor:not-allowed; }
     #scan-history { max-width:400px; margin:20px auto; text-align:left; background:#fff; padding:10px; border-radius:10px; border:1px solid #ccc; }
     .pass { color:green; }
     .denied { color:red; }
+    #loader-msg { color:#666; }
   </style>
 </head>
 <body>
   <h1>QR Code Admission Scanner</h1>
-  <div id="scanner-container"></div>
+  <div id="scanner-container">
+    <div id="loader-msg">Waiting for camera / scanner library...</div>
+  </div>
+
   <div>
     <button id="start-scan">Start Scanning</button>
     <button id="stop-scan" disabled>Stop Scanning</button>
     <button id="clear-history">Clear History</button>
   </div>
+
   <div id="scan-history">
     <h3>Scan History</h3>
     <ul id="history-list"></ul>
   </div>
 
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      // Confirm the library loaded
-      if (typeof window.Html5Qrcode !== "function") {
-        console.error("Html5Qrcode library failed to load. Check the script URL or network/CSP settings.");
-        alert("Scanner library failed to load. See console for details.");
+    // Attempt fallback loading if primary script didn't define Html5Qrcode
+    (function ensureHtml5Qrcode(cb) {
+      const already = typeof window.Html5Qrcode === "function";
+      if (already) {
+        return cb(null);
+      }
+
+      // If primary script is missing/blocked, try a well-known mirror
+      const fallbackUrls = [
+        "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"
+      ];
+
+      let tried = 0;
+      function tryNext() {
+        if (typeof window.Html5Qrcode === "function") return cb(null);
+        if (tried >= fallbackUrls.length) return cb(new Error("Html5Qrcode library failed to load"));
+        const s = document.createElement("script");
+        s.src = fallbackUrls[tried++];
+        s.async = true;
+        s.onload = () => {
+          if (typeof window.Html5Qrcode === "function") return cb(null);
+          tryNext();
+        };
+        s.onerror = tryNext;
+        document.head.appendChild(s);
+      }
+
+      tryNext();
+    })(function(err) {
+      if (err) {
+        console.error("Html5Qrcode library failed to load. Check script URL, network or CSP settings.", err);
+        const loaderMsg = document.getElementById("loader-msg");
+        if (loaderMsg) loaderMsg.textContent = "Scanner library failed to load. See console for details.";
         return;
       }
 
-      const scannerContainer = document.getElementById("scanner-container");
+      // Library loaded successfully — initialize UI and scanner behavior
+      document.addEventListener("DOMContentLoaded", initScanner);
+      // If DOMContentLoaded already fired, call immediately
+      if (document.readyState === "interactive" || document.readyState === "complete") {
+        initScanner();
+      }
+    });
+
+    function initScanner() {
+      // Elements
+      const containerId = "scanner-container";
+      const scannerContainer = document.getElementById(containerId);
       const startButton = document.getElementById("start-scan");
       const stopButton = document.getElementById("stop-scan");
       const clearButton = document.getElementById("clear-history");
       const historyList = document.getElementById("history-list");
+      const loaderMsg = document.getElementById("loader-msg");
 
+      // Remove loader message once we attach scanner element
+      if (loaderMsg && loaderMsg.parentNode) loaderMsg.parentNode.removeChild(loaderMsg);
+
+      // Beep sound (catch play errors silently)
       const beepSound = new Audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3");
 
-      // instantiate after confirming library exists
-      let html5QrcodeScanner = new Html5Qrcode("scanner-container");
+      // Instantiate Html5Qrcode safely
+      let html5Qrcode;
+      try {
+        html5Qrcode = new Html5Qrcode(containerId);
+      } catch (e) {
+        console.error("Failed to create Html5Qrcode instance", e);
+        const el = document.createElement("div");
+        el.textContent = "Unable to create scanner. See console for details.";
+        scannerContainer.appendChild(el);
+        startButton.disabled = true;
+        stopButton.disabled = true;
+        return;
+      }
 
       function giveFeedback() {
-        beepSound.play().catch(err => console.log(err));
+        beepSound.play().catch(() => {});
         if (navigator.vibrate) navigator.vibrate(200);
       }
 
       startButton.addEventListener("click", () => {
-        html5QrcodeScanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: 250 },
+        startButton.disabled = true;
+        // Prefer environment-facing camera
+        const constraints = { facingMode: { ideal: "environment" } };
+        html5Qrcode.start(
+          constraints,
+          { fps: 10, qrbox: Math.min(300, Math.floor(window.innerWidth * 0.8)) },
           qrCodeMessage => {
-            let li = document.createElement("li");
-            if (qrCodeMessage.toLowerCase().includes("pass")) {
+            const li = document.createElement("li");
+            if (typeof qrCodeMessage === "string" && qrCodeMessage.toLowerCase().includes("pass")) {
               li.textContent = `✅ ${qrCodeMessage}`;
               li.classList.add("pass");
             } else {
@@ -74,29 +137,42 @@
             giveFeedback();
           },
           errorMessage => {
-            // optional silent handling
+            // silent by design; could log minimal info
           }
         ).then(() => {
           startButton.disabled = true;
           stopButton.disabled = false;
         }).catch(err => {
+          console.error("Unable to start scanning:", err);
           alert("Unable to start scanning: " + err);
+          startButton.disabled = false;
         });
       });
 
       stopButton.addEventListener("click", () => {
-        html5QrcodeScanner.stop().then(() => {
+        stopButton.disabled = true;
+        html5Qrcode.stop().then(() => {
           startButton.disabled = false;
           stopButton.disabled = true;
         }).catch(err => {
+          console.error("Unable to stop scanning:", err);
           alert("Unable to stop scanning: " + err);
+          stopButton.disabled = false;
         });
       });
 
       clearButton.addEventListener("click", () => {
         historyList.innerHTML = "";
       });
-    });
+
+      // Optional: release camera if user navigates away
+      window.addEventListener("beforeunload", () => {
+        if (html5Qrcode && html5Qrcode.getState && html5Qrcode.getState() === Html5Qrcode.ScannerState.SCANNING) {
+          try { html5Qrcode.stop(); } catch (e) {}
+        }
+      });
+    }
   </script>
 </body>
 </html>
+```

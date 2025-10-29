@@ -312,8 +312,9 @@
         const wl = whitelistEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
         return wl.includes(text);
       }
-      // default rule: starts with "admit:"
-      return /^admit:\\S+/.test(text);
+      // default rule: starts with "admit:" and allows optional whitespace after the colon
+      // Accepts: "admit:myname" and "admit: myname" (no newline)
+      return /^admit:\s*\S+/.test(text);
     }
 
     function logEntry(text, pass) {

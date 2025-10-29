@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Entrance QR Scanner</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --green: #10b981;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --accent: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 800px at 80% -10%, #1f2937 0%, var(--bg) 60%);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      background: linear-gradient(0deg, rgba(255,255,255,0.02), rgba(255,255,255,0.02)), var(--panel);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 {
+      font-size: 18px;
+      margin: 0;
+      letter-spacing: 0.3px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      padding: 16px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 900px) {
+      .grid {
+        grid-template-columns: 2fr 1fr;
+      }
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.0));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+    }
+    .card-header {
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .card-header h2 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0;
+      color: var(--muted);
+      letter-spacing: 0.2px;
+    }
+    .card-body { padding: 14px; }
+
+    /* Scanner */
+    .scanner {
+      position: relative;
+      aspect-ratio: 4 / 3;
+      background: #0b1220;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    canvas { display: none; }
+    .overlay {
+      position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(600px 300px at 50% -10%, rgba(96,165,250,0.12), rgba(0,0,0,0));
+    }
+    .frame {
+      position: absolute; inset: 12% 12%; border-radius: 12px;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.3) inset, 0 0 0 100vmax rgba(0,0,0,0.35);
+    }
+    .scanline {
+      position: absolute; left: 12%; right: 12%; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scan 2.5s linear infinite;
+      box-shadow: 0 0 12px var(--accent);
+    }
+    @keyframes scan {
+      0% { top: 14%; }
+      100% { top: 74%; }
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 12px currentColor; }
+    .dot.ok { background: var(--green); }
+    .dot.err { background: var(--red); }
+
+    .result {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 22px;
+      font-weight: 700;
+      margin: 6px 0 2px;
+    }
+    .badge { padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: 0.3px; }
+    .pass { color: #052e1b; background: linear-gradient(180deg, #34d399, #10b981); }
+    .deny { color: #3b0a06; background: linear-gradient(180deg, #fb7185, #ef4444); }
+
+    .decoded { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; color: var(--text); opacity: 0.95; }
+
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+    button, select {
+      background: #111827;
+      color: var(--text);
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover, select:hover { border-color: rgba(255,255,255,0.18); }
+
+    .log {
+      max-height: 260px;
+      overflow: auto;
+      display: grid;
+      gap: 6px;
+      padding-right: 6px;
+    }
+    .log-item {
+      display: grid; gap: 6px; padding: 8px; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+      background: rgba(255,255,255,0.02);
+    }
+    .log-item small { color: var(--muted); }
+    .log-item .val { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Entrance QR Scanner</h1>
+    <div class="controls">
+      <select id="cameraSelect" title="Select camera"></select>
+      <button id="startBtn">Start</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <button id="torchBtn" disabled>Toggle Torch</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <section class="card">
+        <div class="card-header"><h2>Live Scanner</h2></div>
+        <div class="card-body">
+          <div class="scanner">
+            <video id="video" playsinline></video>
+            <canvas id="canvas"></canvas>
+            <div class="overlay"></div>
+            <div class="frame"></div>
+            <div class="scanline"></div>
+          </div>
+          <div class="status" style="margin-top:10px">
+            <span class="dot" id="statusDot"></span>
+            <span id="statusText">Idle</span>
+          </div>
+          <div class="result" id="resultRow" style="display:none">
+            <span class="badge" id="resultBadge"></span>
+            <span class="decoded" id="decodedText"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header"><h2>Activity Log</h2></div>
+        <div class="card-body">
+          <div class="log" id="log"></div>
+          <div class="controls" style="margin-top:8px">
+            <button id="clearLog">Clear Log</button>
+            <button id="downloadLog">Download CSV</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-header"><h2>Validation Settings</h2></div>
+      <div class="card-body">
+        <p style="margin-top:0; color: var(--muted)">Default rule: allow if the QR text starts with "admit:". Optionally, enable whitelist below.</p>
+        <div class="controls">
+          <label style="display:flex; align-items:center; gap:6px">
+            <input type="checkbox" id="useWhitelist"> Use whitelist
+          </label>
+        </div>
+        <textarea id="whitelist" rows="6" style="width:100%; margin-top:8px; background:#0b1220; color:var(--text); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px" placeholder="One code per line, e.g.\nALICE-123\nBOB-456\n..."></textarea>
+      </div>
+    </section>
+  </main>
+
+  <!-- ZXing library for QR decoding -->
+  <script src="https://unpkg.com/@zxing/library@0.21.2"></script>
+  <script>
+    // Basic state
+    let currentStream = null;
+    let track = null;
+    let torchOn = false;
+    let decoding = false;
+
+    // UI refs
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const torchBtn = document.getElementById('torchBtn');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const resultRow = document.getElementById('resultRow');
+    const resultBadge = document.getElementById('resultBadge');
+    const decodedText = document.getElementById('decodedText');
+    const logEl = document.getElementById('log');
+    const clearLogBtn = document.getElementById('clearLog');
+    const downloadLogBtn = document.getElementById('downloadLog');
+    const useWhitelistEl = document.getElementById('useWhitelist');
+    const whitelistEl = document.getElementById('whitelist');
+
+    // ZXing reader
+    const { BrowserMultiFormatReader, NotFoundException } = ZXing;
+    const codeReader = new BrowserMultiFormatReader();
+
+    // Load persisted settings
+    (function restoreSettings(){
+      const storedWL = localStorage.getItem('qr_wl');
+      const storedUseWL = localStorage.getItem('qr_use_wl');
+      if (storedWL) whitelistEl.value = storedWL;
+      if (storedUseWL) useWhitelistEl.checked = storedUseWL === '1';
+    })();
+
+    function saveSettings(){
+      localStorage.setItem('qr_wl', whitelistEl.value);
+      localStorage.setItem('qr_use_wl', useWhitelistEl.checked ? '1' : '0');
+    }
+
+    useWhitelistEl.addEventListener('change', saveSettings);
+    whitelistEl.addEventListener('input', saveSettings);
+
+    async function listCameras() {
+      cameraSelect.innerHTML = '';
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter(d => d.kind === 'videoinput');
+        cams.forEach((d, i) => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Camera ${i+1}`;
+          cameraSelect.appendChild(opt);
+        });
+        if (cams.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No cameras found';
+          cameraSelect.appendChild(opt);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function setStatus(text, state) {
+      statusText.textContent = text;
+      statusDot.classList.remove('ok', 'err');
+      if (state === 'ok') statusDot.classList.add('ok');
+      if (state === 'err') statusDot.classList.add('err');
+    }
+
+    function setResult(value, pass) {
+      resultRow.style.display = 'flex';
+      decodedText.textContent = value;
+      resultBadge.textContent = pass ? 'PASS' : 'DENIED';
+      resultBadge.className = 'badge ' + (pass ? 'pass' : 'deny');
+    }
+
+    function validateCode(text) {
+      const useWL = useWhitelistEl.checked;
+      if (useWL) {
+        const wl = whitelistEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        return wl.includes(text);
+      }
+      // default rule: starts with "admit:"
+      return /^admit:\\S+/.test(text);
+    }
+
+    function logEntry(text, pass) {
+      const li = document.createElement('div');
+      li.className = 'log-item';
+      const ts = new Date().toLocaleString();
+      li.innerHTML = `<small>${ts} — <strong>${pass ? 'PASS' : 'DENIED'}</strong></small><div class="val">${escapeHtml(text)}</div>`;
+      logEl.prepend(li);
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+    }
+
+    function downloadCSV() {
+      const rows = [['timestamp','status','value']];
+      const items = Array.from(logEl.querySelectorAll('.log-item'));
+      items.reverse().forEach(item => {
+        const [meta, valEl] = item.children;
+        const m = meta.textContent;
+        const ts = m.slice(0, m.indexOf(' — '));
+        const status = m.includes('PASS') ? 'PASS' : 'DENIED';
+        const val = valEl.textContent;
+        rows.push([ts, status, val]);
+      });
+      const csv = rows.map(r => r.map(f => '"' + String(f).replace(/"/g,'""') + '"').join(',')).join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'qr_log.csv'; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function start() {
+      stop();
+      setResult('', true); // reset UI
+      resultRow.style.display = 'none';
+      setStatus('Starting camera…');
+
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+
+      const selectedDeviceId = cameraSelect.value;
+      if (selectedDeviceId) {
+        constraints.video = { deviceId: { exact: selectedDeviceId } };
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        currentStream = stream;
+        video.srcObject = stream;
+        await video.play();
+
+        track = stream.getVideoTracks()[0] || null;
+        torchBtn.disabled = !track || !track.getCapabilities || !track.getCapabilities().torch;
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        setStatus('Scanning…', 'ok');
+        decoding = true;
+        requestAnimationFrame(tick);
+      } catch (err) {
+        console.error(err);
+        setStatus('Camera error: ' + (err && err.message ? err.message : err), 'err');
+      }
+    }
+
+    function stop() {
+      decoding = false;
+      if (track) { track.stop(); track = null; }
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+        currentStream = null;
+      }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      torchBtn.disabled = true;
+      setStatus('Stopped');
+    }
+
+    async function tick() {
+      if (!decoding) return;
+      try {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (w && h) {
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(video, 0, 0, w, h);
+          const imgData = ctx.getImageData(0, 0, w, h);
+
+          try {
+            const result = await codeReader.decodeFromImage(undefined, imgData);
+            if (result && result.text) {
+              const text = result.text.trim();
+              const pass = validateCode(text);
+              setResult(text, pass);
+              logEntry(text, pass);
+              // Pause briefly to avoid duplicates
+              decoding = false;
+              setTimeout(() => { decoding = true; requestAnimationFrame(tick); }, 1200);
+            }
+          } catch (e) {
+            if (!(e instanceof NotFoundException)) {
+              // Non-not-found error
+              console.debug('Decode error', e);
+            }
+          }
+        }
+      } catch (e) {
+        console.debug('Frame error', e);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    async function toggleTorch() {
+      if (!track) return;
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      if (!caps.torch) return;
+      torchOn = !torchOn;
+      await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+      torchBtn.textContent = torchOn ? 'Torch Off' : 'Toggle Torch';
+    }
+
+    startBtn.addEventListener('click', start);
+    stopBtn.addEventListener('click', stop);
+    torchBtn.addEventListener('click', toggleTorch);
+    clearLogBtn.addEventListener('click', () => { logEl.innerHTML = ''; });
+    downloadLogBtn.addEventListener('click', downloadCSV);
+
+    cameraSelect.addEventListener('change', () => {
+      if (!stopBtn.disabled) start();
+    });
+
+    // Init
+    (async function init(){
+      await listCameras();
+      // On iOS Safari, camera labels require prior permission to be visible
+      // so we try a silent start then stop to populate labels
+      try {
+        await start();
+        stop();
+        await listCameras();
+      } catch {}
+    })();
+
+    // PWA-ish install prompt if desired (optional)
+    // window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); /* show custom UI if needed */ });
+  </script>
+</body>
+</html>

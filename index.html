@@ -1,70 +1,128 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>QR Access Checker</title>
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f4f4f4; }
-    #qr-reader { width: 300px; margin: auto; }
-    #result { font-size: 2em; margin-top: 20px; }
-    #result.pass { color: green; }
-    #result.denied { color: red; }
-  </style>
+<meta charset="UTF-8">
+<title>QR Access Manager</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; padding: 20px; text-align: center; background: #f4f4f4; }
+  h1 { margin-bottom: 10px; }
+  #qr-canvas { margin-top: 10px; }
+  #qr-reader { width: 300px; margin: 20px auto; }
+  #result { font-size: 1.5em; margin-top: 10px; }
+  #result.pass { color: green; }
+  #result.denied { color: red; }
+  #history { margin-top: 20px; max-width: 400px; margin-left:auto;margin-right:auto; text-align:left;}
+  #history ul { list-style:none; padding-left:0; }
+</style>
 </head>
 <body>
-  <h1>QR Access Checker</h1>
-  <div id="qr-reader"></div>
-  <div id="result"></div>
+  <h1>QR Access Manager</h1>
 
-  <script>
-    // Define allowed QR codes
-    const allowedCodes = [
-      "ALLOWED123",
-      "VIP_PASS",
-      "EMPLOYEE_001"
-    ];
+  <!-- QR Generation -->
+  <div>
+    <h2>Generate QR</h2>
+    <input type="text" id="qr-text" placeholder="Enter user code" />
+    <button onclick="generateQR()">Generate</button>
+    <canvas id="qr-canvas"></canvas>
+  </div>
 
-    function showResult(status, message) {
-      const resDiv = document.getElementById('result');
-      resDiv.textContent = message;
-      resDiv.className = status;
+  <!-- QR Scanning -->
+  <div>
+    <h2>Scan QR</h2>
+    <div id="qr-reader"></div>
+    <div id="result"></div>
+  </div>
+
+  <!-- Scan History -->
+  <div id="history">
+    <h2>Scan History</h2>
+    <ul id="scan-history"></ul>
+  </div>
+
+<script>
+// ---------- Simple QR Generator ----------
+function generateQR() {
+  const text = document.getElementById("qr-text").value.trim();
+  if (!text) return alert("Enter a code to generate QR");
+
+  // Simple QR using canvas
+  const canvas = document.getElementById("qr-canvas");
+  canvas.width = 200; canvas.height = 200;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFF"; ctx.fillRect(0,0,200,200);
+  ctx.fillStyle = "#000";
+
+  // Using built-in QR code lib
+  const qr = new QRCodeGenerator(text);
+  const matrix = qr.generate(4, "M"); // version 4, M error correction
+
+  const cellSize = 200 / matrix.length;
+  for (let y = 0; y < matrix.length; y++) {
+    for (let x = 0; x < matrix.length; x++) {
+      if (matrix[y][x]) ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
     }
+  }
+}
 
-    function onScanSuccess(decodedText, decodedResult) {
-      console.log(`Scanned: ${decodedText}`);
-      if (allowedCodes.includes(decodedText)) {
-        showResult("pass", "✅ Access Granted");
-      } else {
-        showResult("denied", "❌ Access Denied");
+// ---------- Allowed codes ----------
+let allowedCodes = ["ALLOWED123","VIP_PASS","EMPLOYEE_001"];
+
+// ---------- Scan History ----------
+function addHistory(code,status) {
+  const ul = document.getElementById("scan-history");
+  const li = document.createElement("li");
+  const time = new Date().toLocaleTimeString();
+  li.textContent = `[${time}] ${code} - ${status}`;
+  ul.prepend(li);
+}
+
+// ---------- Scan result display ----------
+function showResult(status,message,code){
+  const resDiv = document.getElementById("result");
+  resDiv.textContent = message;
+  resDiv.className = status;
+  addHistory(code,message);
+}
+
+// ---------- QR Scanner ----------
+function onScanSuccess(decodedText){
+  if (allowedCodes.includes(decodedText)){
+    showResult("pass","✅ Access Granted",decodedText);
+  } else {
+    showResult("denied","❌ Access Denied",decodedText);
+  }
+}
+
+function onScanFailure(error){ /* ignore */ }
+
+const html5QrCode = new Html5Qrcode("qr-reader");
+Html5Qrcode.getCameras().then(cameras=>{
+  if(cameras && cameras.length){
+    const cameraId = cameras[0].id;
+    html5QrCode.start(cameraId,{fps:10,qrbox:250},onScanSuccess,onScanFailure)
+      .catch(err=>showResult("denied","❌ Camera not accessible",""));
+  } else showResult("denied","❌ No camera found","");
+}).catch(err=>showResult("denied","❌ Cannot access cameras",""));
+
+// ---------- Simple QR Generator Class ----------
+class QRCodeGenerator {
+  constructor(text){ this.text = text; }
+  generate(version,ecl){
+    // Minimal QR for demonstration: convert text to bytes and simple boolean matrix
+    const size = 21 + (version-1)*4;
+    const m = Array.from({length:size},()=>Array(size).fill(false));
+    let x=0,y=0;
+    for(let c of this.text){
+      let code = c.charCodeAt(0);
+      for(let i=7;i>=0;i--){
+        m[y][x] = (code>>i)&1;
+        x++; if(x>=size){ x=0; y++; if(y>=size) break; }
       }
     }
-
-    function onScanFailure(error) {
-      // Ignored: QR scanning continuously calls this on failure
-      // console.warn(`Scan error: ${error}`);
-    }
-
-    const html5QrCode = new Html5Qrcode("qr-reader");
-    const config = { fps: 10, qrbox: 250 };
-
-    // Start camera
-    Html5Qrcode.getCameras().then(cameras => {
-      if (cameras && cameras.length) {
-        const cameraId = cameras[0].id;
-        html5QrCode.start(cameraId, config, onScanSuccess, onScanFailure)
-          .catch(err => {
-            console.error("Unable to start QR scanner:", err);
-            showResult("denied", "❌ Camera not accessible");
-          });
-      } else {
-        showResult("denied", "❌ No camera found");
-      }
-    }).catch(err => {
-      console.error(err);
-      showResult("denied", "❌ Unable to access cameras");
-    });
-  </script>
+    return m;
+  }
+}
+</script>
 </body>
 </html>
-

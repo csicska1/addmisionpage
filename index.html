@@ -10,10 +10,10 @@
   h1 { margin-bottom: 5px; }
   .section { background:#fff; padding:20px; margin:20px auto; border-radius:8px; max-width:400px; box-shadow:0 0 10px rgba(0,0,0,0.1); }
   input[type=text]{ width:70%; padding:8px; margin-bottom:10px; }
-  button{ padding:8px 15px; cursor:pointer; border:none; background:#007BFF; color:white; border-radius:4px; }
+  button{ padding:8px 15px; cursor:pointer; border:none; background:#007BFF; color:white; border-radius:4px; margin-top:5px; }
   button:hover{ background:#0056b3; }
   #qr-canvas { margin-top:10px; }
-  #qr-reader { width:300px; margin:0 auto; }
+  #qr-reader { width:300px; margin:10px auto; display:none; }
   #result { font-size:1.2em; margin-top:10px; font-weight:bold; }
   #result.pass { color:green; }
   #result.denied { color:red; }
@@ -35,6 +35,7 @@
 
 <div class="section">
   <h2>Scan QR</h2>
+  <button id="start-scan">Start Camera Scan</button>
   <div id="qr-reader"></div>
   <div id="result"></div>
 </div>
@@ -76,6 +77,9 @@ function showResult(status,message,code){
 }
 
 // ---------- QR Scanner ----------
+let html5QrCode;
+let scanning = false;
+
 function onScanSuccess(decodedText){
   if(allowedCodes.includes(decodedText)){
     showResult("pass","✅ Access Granted",decodedText);
@@ -86,24 +90,29 @@ function onScanSuccess(decodedText){
 
 function onScanFailure(error){ /* ignore scan failures */ }
 
-// Initialize scanner
-const html5QrCode = new Html5Qrcode("qr-reader");
-Html5Qrcode.getCameras().then(cameras => {
-  if(cameras && cameras.length){
-    const cameraId = cameras[0].id;
-    html5QrCode.start(
-      cameraId,
-      {fps:10, qrbox:250},
-      onScanSuccess,
-      onScanFailure
-    ).catch(err=>{
-      showResult("denied","❌ Camera not accessible","");
-      console.error(err);
-    });
-  } else showResult("denied","❌ No camera found","");
-}).catch(err=>{
-  showResult("denied","❌ Cannot access camera","");
-  console.error(err);
+document.getElementById("start-scan").addEventListener("click", function(){
+  if(scanning) return; // prevent multiple starts
+  scanning = true;
+  const readerDiv = document.getElementById("qr-reader");
+  readerDiv.style.display = "block";
+  html5QrCode = new Html5Qrcode("qr-reader");
+  Html5Qrcode.getCameras().then(cameras => {
+    if(cameras && cameras.length){
+      const cameraId = cameras[0].id;
+      html5QrCode.start(
+        cameraId,
+        {fps:10, qrbox:250},
+        onScanSuccess,
+        onScanFailure
+      ).catch(err=>{
+        showResult("denied","❌ Camera not accessible","");
+        console.error(err);
+      });
+    } else showResult("denied","❌ No camera found","");
+  }).catch(err=>{
+    showResult("denied","❌ Cannot access camera","");
+    console.error(err);
+  });
 });
 </script>
 

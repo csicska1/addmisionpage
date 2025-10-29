@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Auto OCR Sequence Checker</title>
+  <title>Auto OCR Sequence Checker (with Admin Code)</title>
   <style>
     body { font-family: Arial, sans-serif; margin:20px; background:#f6f7fb; color:#222; text-align:center; }
     h1 { margin-bottom:6px; }
@@ -18,7 +18,6 @@
     #history { max-width:520px; margin:14px auto 0; text-align:left; background:#fff; padding:10px; border-radius:8px; border:1px solid #e0e3ea; }
     li.pass { color:green; font-weight:700; }
     li.denied { color:#c00; font-weight:700; }
-    #target { font-weight:700; color:#333; }
     #adminPanel { margin-top:12px; display:none; background:#fff; padding:10px; border-radius:8px; border:1px solid #ddd; max-width:520px; margin-left:auto; margin-right:auto; text-align:left; }
     input[type="text"], input[type="password"] { padding:6px 8px; border-radius:4px; border:1px solid #ccc; width:200px; }
     label { display:block; margin-top:8px; font-weight:600; }
@@ -70,16 +69,17 @@
     </div>
   </div>
 
-  <!-- Tesseract.js - if your hosting blocks CDN, self-host tesseract.min.js and update src -->
+  <!-- Tesseract.js - self-host if CDN blocked -->
   <script src="https://unpkg.com/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
 
   <script>
-    // -------- CONFIGURATION --------
-    const ADMIN_CODE = "Diane foxington"; // change to secure code you want
-    const DEFAULT_WHITELIST = ["635283"]; // defaults
-    const OCR_INTERVAL_MS = 700; // how often to capture frames for OCR during auto-scan
-    const EXTRACT_DIGITS_ONLY = true; // extract only digits from OCR result
-    // --------------------------------
+    // -------- ADMIN CODE (FIND THIS LINE) --------
+    const ADMIN_CODE = "letmein123"; // <-- ADMIN CODE HERE
+    // -------- OTHER CONFIGURATION --------
+    const DEFAULT_WHITELIST = ["123456"];
+    const OCR_INTERVAL_MS = 700;
+    const EXTRACT_DIGITS_ONLY = true;
+    // ----------------------------------------------
 
     // UI refs
     const video = document.getElementById('video');
@@ -178,7 +178,6 @@
         restartScanBtn.disabled = true;
         statusText.textContent = 'Scanning (auto). Point camera at numbers.';
         lastFoundBadge.style.display = 'none';
-        // start periodic OCR attempts
         ocrTimer = setInterval(captureAndOcrOnce, OCR_INTERVAL_MS);
       } catch (err) {
         console.error('camera start failed', err);
@@ -213,7 +212,6 @@
           isProcessingOcr = false;
           return;
         }
-        // crop center area to improve OCR speed and reliability
         const ctx = canvas.getContext('2d');
         const cropW = Math.floor(vw * 0.8);
         const cropH = Math.floor(vh * 0.4);
@@ -227,8 +225,6 @@
 
         const dataUrl = canvas.toDataURL('image/png');
 
-        // run OCR (Tesseract.recognize)
-        // Tesseract is somewhat heavy; caching loaded worker would be better but for simplicity we call recognize
         let result;
         try {
           result = await Tesseract.recognize(dataUrl, 'eng', { logger: m => {} });
@@ -240,12 +236,10 @@
         const raw = result && result.data && result.data.text ? result.data.text : '';
         const digits = normalizeText(raw);
         if (digits) {
-          // something found — stop scanning and evaluate
           if (ocrTimer) {
             clearInterval(ocrTimer);
             ocrTimer = null;
           }
-          // stop camera tracks but keep video frame visible for review
           if (stream) stream.getTracks().forEach(t => t.stop());
           scanning = false;
           startBtn.disabled = false;
@@ -258,7 +252,6 @@
           const passed = checkWhitelist(digits);
           addHistoryItem(digits + (passed ? ' (Pass)' : ' (Denied)'), passed);
           statusText.textContent = passed ? 'PASS' : 'DENIED';
-          // optional feedback
           try { new Audio('https://www.soundjay.com/buttons/sounds/beep-07.mp3').play().catch(()=>{}); } catch(e){}
         }
       } finally {
@@ -299,18 +292,11 @@
     startBtn.addEventListener('click', startCameraAndAutoScan);
     stopBtn.addEventListener('click', stopCamera);
     restartScanBtn.addEventListener('click', () => {
-      // allow user to start another auto-scan session
       lastFoundBadge.style.display = 'none';
       statusText.textContent = 'Idle';
       startCameraAndAutoScan();
     });
     clearBtn.addEventListener('click', () => list.innerHTML = '');
-
-    // convenience: load whitelist UI on page load (hidden)
-    renderWhitelist();
-
-    // If desired, start automatically immediately on page load:
-    // startCameraAndAutoScan();
 
     // cleanup
     window.addEventListener('beforeunload', () => {

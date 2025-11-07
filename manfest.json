@@ -1,0 +1,15 @@
+{
+  "name": "Clean Dodge",
+  "short_name": "Dodge",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgdmlld0JveD0iMCAwIDEyMCAxMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iNjAiIGN5PSI2MCIgcj0iNjAiIGZpbGw9IiMwMDAiIG9wYWNpdHk9Ii4yIi8+PHRleHQgeD0iNjAiIHk9Ijc2IiBmb250LXNpemU9IjQwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9ImFyaWFsIj5EPjwvdGV4dD48L3N2Zz4=",
+      "sizes": "120x120",
+      "type": "image/svg+xml"
+    }
+  ]
+}

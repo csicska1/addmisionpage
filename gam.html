@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mobil Dodge - Egyoldalas Játék</title>
+<style>
+  /* Reset és teljes képernyő */
+  :root{
+    --bg:#0f1720;
+    --player:#22c55e;
+    --ob:#ef4444;
+    --ui:#e6edf3;
+    --accent:#60a5fa;
+    --font: "Helvetica Neue", Arial, sans-serif;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ui);font-family:var(--font);-webkit-tap-highlight-color:transparent;}
+  #gameWrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;}
+  canvas{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0));border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,0.5);touch-action:none;}
+  /* UI */
+  .hud{width:100%;max-width:480px;display:flex;justify-content:space-between;padding:10px 14px;box-sizing:border-box;align-items:center}
+  .panel{background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:10px;font-size:15px}
+  .big{font-size:20px;font-weight:700}
+  .controls{display:flex;gap:8px}
+  button{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--ui);padding:8px 10px;border-radius:8px;font-size:14px}
+  .hint{opacity:0.8;font-size:13px}
+  /* touch zones (látható demóhoz) */
+  .touchLayer{position:absolute;inset:0;display:flex;pointer-events:none}
+  .zone{flex:1;background:transparent;pointer-events:auto}
+  .footer{margin-top:10px;color:rgba(230,237,243,0.6);font-size:13px}
+  @media (min-width:700px){
+    body{background:linear-gradient(180deg,#071023,#082032);}
+  }
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <div class="hud" style="max-width:480px;">
+    <div class="panel">
+      <div class="big" id="score">Pont: 0</div>
+      <div class="hint" id="best">Legjobb: 0</div>
+    </div>
+    <div class="controls">
+      <button id="btnPause">Szünet</button>
+      <button id="btnRestart">Újra</button>
+    </div>
+  </div>
+
+  <canvas id="c"></canvas>
+
+  <div class="footer">Érints balra/jobbra mozogni • Tartsa a képernyőt állítva a legjobb élményért 📱</div>
+</div>
+
+<!-- Képernyő jobb/bal érintéshez -->
+<div class="touchLayer" aria-hidden="true">
+  <div class="zone" id="leftZone"></div>
+  <div class="zone" id="rightZone"></div>
+</div>
+
+<script>
+/*
+  Mobil Dodge
+  - Egyszerű, könnyen testreszabható
+  - Touch és egér támogatás
+  - LocalStorage a legjobb eredményhez
+*/
+
+/* --- Konfiguráció --- */
+const CONFIG = {
+  width: 360,            // in-game canvas width (scales to device)
+  height: 640,           // in-game canvas height
+  playerW: 44,
+  playerH: 20,
+  playerSpeed: 6.0,      // px per frame (in game space)
+  spawnInterval: 900,    // ms kezdetben
+  speedUpEvery: 10,      // pontonként nehezítés
+  obstacleSpeedBase: 2.2,
+  obstacleSpeedIncrease: 0.16
+};
+
+/* --- Canvas setup (retina aware) --- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+function resizeCanvas(){
+  const maxW = Math.min(window.innerWidth - 20, 480);
+  const scale = maxW / CONFIG.width;
+  canvas.style.width = Math.round(CONFIG.width * scale) + 'px';
+  canvas.style.height = Math.round(CONFIG.height * scale) + 'px';
+  // actual pixel size for crispness
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = Math.round(CONFIG.width * dpr);
+  canvas.height = Math.round(CONFIG.height * dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+/* --- Game state --- */
+let running = true;
+let lastTime = 0;
+let spawnTimer = 0;
+let spawnInterval = CONFIG.spawnInterval;
+let score = 0;
+let best = Number(localStorage.getItem('mob_dodge_best') || 0);
+document.getElementById('best').textContent = 'Legjobb: ' + best;
+
+/* Player */
+const player = {
+  x: CONFIG.width / 2 - CONFIG.playerW/2,
+  y: CONFIG.height - CONFIG.playerH - 20,
+  w: CONFIG.playerW,
+  h: CONFIG.playerH,
+  vx: 0
+};
+
+/* Obstacles: array of {x,y,w,h, speed} */
+let obstacles = [];
+
+/* Input */
+let input = {left:false,right:false};
+function stepInput(){
+  if(input.left) player.vx = -CONFIG.playerSpeed;
+  else if(input.right) player.vx = CONFIG.playerSpeed;
+  else player.vx = 0;
+}
+
+/* Spawn obstacles */
+function spawnObstacle(){
+  const w = 24 + Math.random()*48;
+  const x = Math.max(6, Math.random()*(CONFIG.width - w - 12));
+  obstacles.push({
+    x, y: -30,
+    w, h: 14 + Math.random()*28,
+    speed: CONFIG.obstacleSpeedBase + Math.random()*1.2 + Math.floor(score/CONFIG.speedUpEvery)*CONFIG.obstacleSpeedIncrease
+  });
+}
+
+/* Collision */
+function rectsOverlap(a,b){
+  return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+}
+
+/* Update */
+function update(dt){
+  stepInput();
+  player.x += player.vx;
+  if(player.x < 6) player.x = 6;
+  if(player.x + player.w > CONFIG.width - 6) player.x = CONFIG.width - 6 - player.w;
+
+  spawnTimer += dt;
+  if(spawnTimer > spawnInterval){
+    spawnTimer = 0;
+    spawnObstacle();
+    // kisebb intervallum, ha nő a pontszám
+    spawnInterval = Math.max(320, CONFIG.spawnInterval - Math.floor(score/12)*40);
+  }
+
+  for(let i = obstacles.length -1; i>=0; i--){
+    const o = obstacles[i];
+    o.y += o.speed;
+    if(o.y > CONFIG.height + 40){
+      obstacles.splice(i,1);
+      score++;
+      document.getElementById('score').textContent = 'Pont: ' + score;
+      if(score > best){ best = score; localStorage.setItem('mob_dodge_best', best); document.getElementById('best').textContent = 'Legjobb: ' + best; }
+    } else {
+      // ütközés
+      if(rectsOverlap(player, o)){
+        gameOver();
+        return;
+      }
+    }
+  }
+}
+
+/* Draw */
+function draw(){
+  // clear
+  ctx.clearRect(0,0,CONFIG.width,CONFIG.height);
+
+  // háttér finomság
+  const g = ctx.createLinearGradient(0,0,0,CONFIG.height);
+  g.addColorStop(0, '#071428');
+  g.addColorStop(1, '#081726');
+  ctx.fillStyle = g;
+  roundRect(ctx,0,0,CONFIG.width,CONFIG.height,12,true,false);
+
+  // player
+  ctx.fillStyle = '#22c55e';
+  roundRect(ctx, player.x, player.y, player.w, player.h, 6, true, false);
+  // játékos fény
+  ctx.fillStyle = 'rgba(34,197,94,0.12)';
+  ctx.fillRect(player.x-4, player.y-10, player.w+8, 6);
+
+  // obstacles
+  ctx.fillStyle = '#ef4444';
+  obstacles.forEach(o => roundRect(ctx, o.x, o.y, o.w, o.h, 6, true, false));
+
+  // pár dekorációs jelek a tetején
+  ctx.fillStyle = 'rgba(230,237,243,0.06)';
+  for(let i=0;i<6;i++){
+    ctx.fillRect(12 + i*58, 8, 34, 2);
+  }
+}
+
+/* Helper: rounded rect */
+function roundRect(ctx, x, y, w, h, r, fill, stroke){
+  if (typeof r === 'undefined') r = 5;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+  if(fill){ ctx.fill(); }
+  if(stroke){ ctx.stroke(); }
+}
+
+/* Game loop */
+function loop(t){
+  if(!lastTime) lastTime = t;
+  const dt = t - lastTime;
+  lastTime = t;
+  if(running){
+    update(dt);
+    draw();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* Game over */
+function gameOver(){
+  running = false;
+  // rövid "explosion" effekt
+  const overlay = document.createElement('div');
+  overlay.style.position='fixed';
+  overlay.style.inset='0';
+  overlay.style.display='flex';
+  overlay.style.alignItems='center';
+  overlay.style.justifyContent='center';
+  overlay.style.background='linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.65))';
+  overlay.style.color='#fff';
+  overlay.style.zIndex=9999;
+  overlay.innerHTML = `<div style="text-align:center;max-width:90%;padding:18px;background:rgba(10,20,30,0.8);border-radius:12px">
+    <div style="font-size:28px;font-weight:800;margin-bottom:6px">Vesztettél</div>
+    <div style="font-size:18px;margin-bottom:12px">Pontszám: <strong>${score}</strong></div>
+    <div style="display:flex;gap:8px;justify-content:center">
+      <button id="tryAgain" style="padding:10px 14px;border-radius:10px;border:0;background:#22c55e;color:#042014;font-weight:700">Újra</button>
+      <button id="closeBtn" style="padding:10px 14px;border-radius:10px;border:0;background:#ef4444;color:#2a0a0a;font-weight:700">Bezár</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('tryAgain').addEventListener('click', ()=>{ document.body.removeChild(overlay); restart(); });
+  document.getElementById('closeBtn').addEventListener('click', ()=>{ document.body.removeChild(overlay); running=false; });
+}
+
+/* Restart */
+function restart(){
+  score = 0;
+  document.getElementById('score').textContent = 'Pont: ' + score;
+  obstacles = [];
+  player.x = CONFIG.width / 2 - CONFIG.playerW/2;
+  spawnInterval = CONFIG.spawnInterval;
+  spawnTimer = 0;
+  running = true;
+  lastTime = 0;
+  requestAnimationFrame(loop);
+}
+
+/* Pause button */
+document.getElementById('btnPause').addEventListener('click', ()=>{
+  running = !running;
+  document.getElementById('btnPause').textContent = running ? 'Szünet' : 'Folytat';
+  if(running) { lastTime = 0; requestAnimationFrame(loop); }
+});
+
+/* Restart button */
+document.getElementById('btnRestart').addEventListener('click', restart);
+
+/* Input: touch buttons (left/right zones) */
+const leftZone = document.getElementById('leftZone');
+const rightZone = document.getElementById('rightZone');
+
+function pointerDownLeft(e){ e.preventDefault(); input.left = true; }
+function pointerUpLeft(e){ e.preventDefault(); input.left = false; }
+function pointerDownRight(e){ e.preventDefault(); input.right = true; }
+function pointerUpRight(e){ e.preventDefault(); input.right = false; }
+
+leftZone.addEventListener('touchstart', pointerDownLeft);
+leftZone.addEventListener('touchend', pointerUpLeft);
+leftZone.addEventListener('touchcancel', pointerUpLeft);
+rightZone.addEventListener('touchstart', pointerDownRight);
+rightZone.addEventListener('touchend', pointerUpRight);
+rightZone.addEventListener('touchcancel', pointerUpRight);
+
+/* Also support mouse for desktop debugging */
+leftZone.addEventListener('mousedown', ()=>input.left=true);
+window.addEventListener('mouseup', ()=>{ input.left=false; input.right=false; });
+rightZone.addEventListener('mousedown', ()=>input.right=true);
+
+/* Allow tapping canvas to jump left/right relative to tap pos */
+canvas.addEventListener('touchstart', (ev)=>{
+  const rect = canvas.getBoundingClientRect();
+  const t = ev.touches[0];
+  const x = (t.clientX - rect.left) / (rect.width) * CONFIG.width;
+  if(x < CONFIG.width/2){ input.left = true; setTimeout(()=>input.left=false, 140); }
+  else { input.right = true; setTimeout(()=>input.right=false, 140); }
+});
+
+/* Optional: tilt control (uncomment to enable)
+if(window.DeviceOrientationEvent){
+  window.addEventListener('deviceorientation', e=>{
+    // gamma: -90 .. 90 tilt left/right
+    const g = e.gamma || 0;
+    if(Math.abs(g) > 6){
+      player.vx = Math.sign(g) * Math.min(CONFIG.playerSpeed*1.6, Math.abs(g)/20 * CONFIG.playerSpeed*1.6);
+    }
+  });
+}
+*/
+
+/* Keyboard fallback */
+window.addEventListener('keydown', e=>{
+  if(e.key === 'ArrowLeft') input.left = true;
+  if(e.key === 'ArrowRight') input.right = true;
+  if(e.key === ' '){ running = !running; document.getElementById('btnPause').textContent = running ? 'Szünet' : 'Folytat'; }
+});
+window.addEventListener('keyup', e=>{
+  if(e.key === 'ArrowLeft') input.left = false;
+  if(e.key === 'ArrowRight') input.right = false;
+});
+</script>
+</body>
+</html>

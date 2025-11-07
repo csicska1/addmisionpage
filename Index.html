@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Clean Dodge — iOS Dark Mode</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+
+<style>
+:root{
+  --bg:#000000;
+  --surface:#0b0b0b;
+  --surface2:#121212;
+  --text:#ffffff;
+  --accent:#0a84ff;
+  --player:#30d158;
+  --ob:#ff453a;
+  --radius:14px;
+  font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+}
+
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent;}
+#wrap{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow:hidden}
+
+/* top bar */
+.hud{
+  width:100%;max-width:540px;display:flex;justify-content:space-between;align-items:center;
+  padding:14px 16px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  box-sizing:border-box;backdrop-filter: blur(6px);
+}
+.panel{display:flex;flex-direction:column;gap:2px}
+#score{font-weight:600;font-size:19px}
+#best{font-size:13px;opacity:.6}
+
+/* buttons */
+.controls{display:flex;gap:8px}
+button{
+  background:rgba(255,255,255,0.03);
+  border:none;padding:8px 12px;border-radius:12px;color:var(--text);font-size:14px;
+  backdrop-filter: blur(6px);
+}
+
+/* canvases */
+.layer{border-radius:18px;max-width:480px;box-shadow:0 8px 30px rgba(0,0,0,0.6);overflow:hidden;margin-top:10px}
+canvas{display:block;width:100%;height:auto;touch-action:none;background:transparent}
+
+/* touch layer */
+.touchLayer{position:fixed;inset:0;display:flex;pointer-events:none}
+.zone{flex:1;pointer-events:auto}
+
+/* install hint */
+.installHint{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;background:rgba(255,255,255,0.03);
+  padding:10px 14px;border-radius:14px;font-size:14px;opacity:0.95;backdrop-filter: blur(6px);display:flex;gap:8px;align-items:center;z-index:40}
+
+/* footer */
+.footer{margin-top:12px;font-size:13px;opacity:0.5}
+
+/* subtle iOS-like pulse for player */
+@keyframes pulse {
+  0%{box-shadow:0 0 0 0 rgba(48,209,88,0.12)}
+  70%{box-shadow:0 0 0 14px rgba(48,209,88,0)}
+  100%{box-shadow:0 0 0 0 rgba(48,209,88,0)}
+}
+
+/* small responsive tweak */
+@media (min-width:700px){body{background:linear-gradient(180deg,#050507,#0b0b0b)}}
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <div class="hud" style="max-width:480px">
+    <div class="panel">
+      <div id="score">Pont: 0</div>
+      <div id="best">Legjobb: 0</div>
+    </div>
+    <div class="controls">
+      <button id="pauseBtn">Szünet</button>
+      <button id="restartBtn">Újra</button>
+    </div>
+  </div>
+
+  <!-- layered canvases inside a rounded surface -->
+  <div class="layer" style="width:92%;max-width:480px;">
+    <!-- background particles canvas -->
+    <canvas id="bgCanvas" aria-hidden="true"></canvas>
+    <!-- game canvas -->
+    <canvas id="gameCanvas"></canvas>
+  </div>
+
+  <div class="footer">Érints balra/jobbra a mozgáshoz • Telepíthető appként is</div>
+</div>
+
+<!-- touch zones for big thumbs -->
+<div class="touchLayer">
+  <div class="zone" id="leftZone"></div>
+  <div class="zone" id="rightZone"></div>
+</div>
+
+<!-- optional install hint (hidden until prompt available) -->
+<div id="installHint" class="installHint" style="display:none;max-width:92%;max-width:440px;">
+  <div style="font-weight:600">Telepítés</div>
+  <div style="opacity:.8;font-size:13px">Hozzáadás a főképernyőhöz</div>
+  <button id="installBtn" style="margin-left:auto;padding:8px 12px;border-radius:10px;background:var(--accent);border:none;color:white">Telepít</button>
+  <button id="dismissInstall" style="background:transparent;border:none;color:rgba(255,255,255,0.6)">X</button>
+</div>
+
+<script>
+/* =========================
+   PWA: Install prompt logic
+   ========================= */
+let deferredPrompt = null;
+const installHint = document.getElementById('installHint');
+const installBtn = document.getElementById('installBtn');
+const dismissInstall = document.getElementById('dismissInstall');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // show our UI
+  installHint.style.display = 'flex';
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  installHint.style.display = 'none';
+});
+dismissInstall.addEventListener('click', () => {
+  installHint.style.display = 'none';
+});
+
+/* register service worker */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(()=>{/* ignore */});
+}
+
+/* =========================
+   Canvas sizing utilities
+   ========================= */
+const bgCanvas = document.getElementById('bgCanvas');
+const gameCanvas = document.getElementById('gameCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+const gCtx = gameCanvas.getContext('2d');
+
+const CONFIG = {
+  width: 360, height: 640,
+  playerW: 44, playerH: 18, playerSpeed: 6,
+  spawnInterval: 900
+};
+
+function resizeAll(){
+  const maxW = Math.min(window.innerWidth - 24, 480);
+  const scale = maxW / CONFIG.width;
+  // style size
+  [bgCanvas, gameCanvas].forEach(c => {
+    c.style.width = Math.round(CONFIG.width * scale) + 'px';
+    c.style.height = Math.round(CONFIG.height * scale) + 'px';
+  });
+  // pixel size retina-aware
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  bgCanvas.width = Math.round(CONFIG.width * dpr);
+  bgCanvas.height = Math.round(CONFIG.height * dpr);
+  gameCanvas.width = Math.round(CONFIG.width * dpr);
+  gameCanvas.height = Math.round(CONFIG.height * dpr);
+  bgCtx.setTransform(dpr,0,0,dpr,0,0);
+  gCtx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize', resizeAll);
+resizeAll();
+
+/* =========================
+   Subtle background particles
+   ========================= */
+let particles = [];
+function initParticles(){
+  particles = [];
+  const count = Math.round((CONFIG.width * CONFIG.height) / 20000); // scales with canvas
+  for(let i=0;i<count;i++){
+    particles.push({
+      x: Math.random()*CONFIG.width,
+      y: Math.random()*CONFIG.height,
+      r: 6 + Math.random()*18,
+      vx: (Math.random()-0.5)*0.08,
+      vy: (Math.random()-0.5)*0.08,
+      alpha: 0.03 + Math.random()*0.08
+    });
+  }
+}
+initParticles();
+
+function drawParticles(dt){
+  bgCtx.clearRect(0,0,CONFIG.width,CONFIG.height);
+  // dark subtle glow gradient
+  const g = bgCtx.createLinearGradient(0,0,0,CONFIG.height);
+  g.addColorStop(0, 'rgba(255,255,255,0.01)');
+  g.addColorStop(1, 'rgba(0,0,0,0.05)');
+  bgCtx.fillStyle = g;
+  bgCtx.fillRect(0,0,CONFIG.width,CONFIG.height);
+
+  particles.forEach(p => {
+    p.x += p.vx * dt * 0.03;
+    p.y += p.vy * dt * 0.03;
+    // wrap
+    if(p.x < -50) p.x = CONFIG.width + 50;
+    if(p.x > CONFIG.width + 50) p.x = -50;
+    if(p.y < -50) p.y = CONFIG.height + 50;
+    if(p.y > CONFIG.height + 50) p.y = -50;
+    // soft radial
+    const rad = bgCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+    rad.addColorStop(0, `rgba(255,255,255,${p.alpha})`);
+    rad.addColorStop(1, 'rgba(255,255,255,0)');
+    bgCtx.fillStyle = rad;
+    bgCtx.beginPath();
+    bgCtx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+    bgCtx.fill();
+  });
+}
+
+/* =========================
+   Game core
+   ========================= */
+let lastTime = 0;
+let spawnTimer = 0;
+let spawnInterval = CONFIG.spawnInterval;
+let score = 0;
+let best = Number(localStorage.getItem('clean_dodge_best') || 0);
+document.getElementById('best').textContent = 'Legjobb: ' + best;
+
+const player = {
+  x: CONFIG.width/2 - CONFIG.playerW/2,
+  y: CONFIG.height - CONFIG.playerH - 20,
+  w: CONFIG.playerW, h: CONFIG.playerH, vx: 0
+};
+let obstacles = [];
+let running = true;
+let input = {left:false,right:false};
+
+function spawnObstacle(){
+  const w = 20 + Math.random()*44;
+  const x = Math.max(6, Math.random()*(CONFIG.width - w - 12));
+  obstacles.push({
+    x, y: -28,
+    w, h: 12 + Math.random()*20,
+    speed: 2.2 + Math.random()*1.2 + Math.floor(score/10)*0.14
+  });
+}
+
+function rectsOverlap(a,b){
+  return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+}
+
+function update(dt){
+  // player movement
+  if(input.left) player.vx = -CONFIG.playerSpeed;
+  else if(input.right) player.vx = CONFIG.playerSpeed;
+  else player.vx = 0;
+  player.x += player.vx;
+  if(player.x < 6) player.x = 6;
+  if(player.x + player.w > CONFIG.width - 6) player.x = CONFIG.width - 6 - player.w;
+
+  // spawn
+  spawnTimer += dt;
+  if(spawnTimer > spawnInterval){
+    spawnTimer = 0; spawnObstacle();
+    spawnInterval = Math.max(320, CONFIG.spawnInterval - Math.floor(score/12)*40);
+  }
+
+  // obstacles
+  for(let i = obstacles.length - 1; i >= 0; i--){
+    const o = obstacles[i];
+    o.y += o.speed;
+    if(o.y > CONFIG.height + 40){
+      obstacles.splice(i,1);
+      score++;
+      document.getElementById('score').textContent = 'Pont: ' + score;
+      if(score > best){ best = score; localStorage.setItem('clean_dodge_best', best); document.getElementById('best').textContent = 'Legjobb: ' + best; }
+    } else {
+      if(rectsOverlap(player, o)){
+        triggerVibration(200);
+        gameOver();
+        return;
+      }
+    }
+  }
+}
+
+/* draw game */
+function draw(){
+  // clear
+  gCtx.clearRect(0,0,CONFIG.width,CONFIG.height);
+  // subtle top decorative lines (iOS feel)
+  gCtx.fillStyle = 'rgba(255,255,255,0.02)';
+  for(let i=0;i<5;i++) gCtx.fillRect(12+i*66, 8, 36, 2);
+
+  // player (rounded)
+  roundRect(gCtx, player.x, player.y, player.w, player.h, 8, true);
+  // glow pulse using shadow (soft)
+  gCtx.save();
+  gCtx.fillStyle = 'rgba(48,209,88,0.08)';
+  gCtx.fillRect(player.x-6, player.y-8, player.w+12, 8);
+  gCtx.restore();
+
+  // obstacles
+  gCtx.fillStyle = 'rgba(255,69,58,1)';
+  obstacles.forEach(o => roundRect(gCtx, o.x, o.y, o.w, o.h, 8, true));
+}
+
+/* rounded rect helper */
+function roundRect(ctx, x, y, w, h, r, fill){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+  if(fill) ctx.fill();
+}
+
+/* main loop */
+function loop(t){
+  if(!lastTime) lastTime = t;
+  const dt = t - lastTime;
+  lastTime = t;
+  // particle layer moves slowly
+  drawParticles(dt);
+  if(running){
+    update(dt);
+    draw();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* game over overlay simple */
+function gameOver(){
+  running = false;
+  // small modal-looking element (native prompt is clumsy on iOS)
+  const overlay = document.createElement('div');
+  overlay.style.position='fixed';overlay.style.inset='0';overlay.style.display='flex';
+  overlay.style.alignItems='center';overlay.style.justifyContent='center';overlay.style.zIndex=60;
+  overlay.style.background='linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.6))';
+  overlay.innerHTML = `
+    <div style="background:var(--surface2);color:var(--text);padding:18px;border-radius:14px;max-width:86%;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,0.6)">
+      <div style="font-weight:800;font-size:22px;margin-bottom:6px">Vesztettél</div>
+      <div style="margin-bottom:12px;font-size:16px">Pont: <strong>${score}</strong></div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button id="tryAgain" style="padding:10px 14px;border-radius:12px;background:var(--player);border:none;color:#051005;font-weight:700">Újra</button>
+        <button id="closeBtn" style="padding:10px 14px;border-radius:12px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text)">Bezár</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('tryAgain').addEventListener('click', ()=>{
+    document.body.removeChild(overlay);
+    restart();
+  });
+  document.getElementById('closeBtn').addEventListener('click', ()=>{
+    document.body.removeChild(overlay);
+  });
+}
+
+/* restart */
+function restart(){
+  score = 0; document.getElementById('score').textContent = 'Pont: ' + score;
+  obstacles = []; player.x = CONFIG.width/2 - CONFIG.playerW/2;
+  spawnInterval = CONFIG.spawnInterval; spawnTimer = 0; running = true; lastTime = 0;
+  requestAnimationFrame(loop);
+}
+
+/* pause & restart buttons */
+document.getElementById('pauseBtn').addEventListener('click', ()=>{
+  running = !running;
+  document.getElementById('pauseBtn').textContent = running ? 'Szünet' : 'Folytat';
+});
+document.getElementById('restartBtn').addEventListener('click', restart);
+
+/* input: touch zones */
+const leftZone = document.getElementById('leftZone');
+const rightZone = document.getElementById('rightZone');
+
+function pointerDownLeft(e){ e.preventDefault(); input.left = true; triggerVibration(10); }
+function pointerUpLeft(e){ e.preventDefault(); input.left = false; }
+function pointerDownRight(e){ e.preventDefault(); input.right = true; triggerVibration(10); }
+function pointerUpRight(e){ e.preventDefault(); input.right = false; }
+
+leftZone.addEventListener('touchstart', pointerDownLeft);
+leftZone.addEventListener('touchend', pointerUpLeft);
+leftZone.addEventListener('touchcancel', pointerUpLeft);
+rightZone.addEventListener('touchstart', pointerDownRight);
+rightZone.addEventListener('touchend', pointerUpRight);
+rightZone.addEventListener('touchcancel', pointerUpRight);
+
+// mouse support for desktop testing
+leftZone.addEventListener('mousedown', ()=>{ input.left=true; triggerVibration(10); });
+rightZone.addEventListener('mousedown', ()=>{ input.right=true; triggerVibration(10); });
+window.addEventListener('mouseup', ()=>{ input.left=false; input.right=false; });
+
+/* also allow quick tap on canvas: left/right depending on tap side */
+gameCanvas.addEventListener('touchstart', (ev)=>{
+  const rect = gameCanvas.getBoundingClientRect();
+  const t = ev.touches[0];
+  const x = (t.clientX - rect.left) / (rect.width) * CONFIG.width;
+  if(x < CONFIG.width/2){ input.left = true; setTimeout(()=>input.left=false, 140); triggerVibration(10); }
+  else { input.right = true; setTimeout(()=>input.right=false, 140); triggerVibration(10); }
+});
+
+/* keyboard fallback */
+window.addEventListener('keydown', e=>{
+  if(e.key === 'ArrowLeft') input.left = true;
+  if(e.key === 'ArrowRight') input.right = true;
+  if(e.key === ' ') { running = !running; document.getElementById('pauseBtn').textContent = running ? 'Szünet' : 'Folytat'; }
+});
+window.addEventListener('keyup', e=>{
+  if(e.key === 'ArrowLeft') input.left = false;
+  if(e.key === 'ArrowRight') input.right = false;
+});
+
+/* vibration helper (graceful) */
+function triggerVibration(ms){
+  if(navigator.vibrate){ try { navigator.vibrate(ms); } catch(e){ /* ignore */ } }
+}
+
+/* initialize a small visual for player color & shadow in canvas drawing state */
+gCtx.fillStyle = '#30d158';
+gCtx.strokeStyle = 'rgba(255,255,255,0.02)';
+
+/* ensure canvases use logical internal size */
+resizeAll();
+</script>
+
+</body>
+</html>
